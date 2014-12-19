@@ -239,7 +239,7 @@ public:
 		}
 	}
 
-	u32 CalculateNwc24ConfigChecksum(void)
+	u32 CalculateNwc24ConfigChecksum()
 	{
 		u32* ptr = (u32*)&config;
 		u32 sum = 0;
@@ -250,7 +250,7 @@ public:
 		return sum;
 	}
 
-	s32 CheckNwc24Config(void)
+	s32 CheckNwc24Config()
 	{
 		if (Magic() != 0x57634366) /* 'WcCf' magic */
 		{
@@ -357,12 +357,12 @@ public:
 
 	void WriteToMem(const u32 address)
 	{
-		Memory::WriteBigEData((const u8*)&config, address, sizeof(config));
+		Memory::CopyToEmu(address, &config, sizeof(config));
 	}
 
 	void ReadFromMem(const u32 address)
 	{
-		Memory::ReadBigEData((u8*)&config, address, sizeof(config));
+		Memory::CopyFromEmu(&config, address, sizeof(config));
 	}
 
 	void ReadConfig()
@@ -422,7 +422,8 @@ private:
 		IOCTL_NWC24_REQUEST_SHUTDOWN                = 0x28,
 	};
 
-	enum {
+	enum
+	{
 		MODEL_RVT = 0,
 		MODEL_RVV = 0,
 		MODEL_RVL = 1,
@@ -530,14 +531,14 @@ private:
 	// Seconds between 1.1.1970 and 4.1.2008 16:00:38
 	static const u64 wii_bias = 0x477E5826;
 
-	// Returns seconds since wii epoch
+	// Returns seconds since Wii epoch
 	// +/- any bias set from IOCTL_NW24_SET_UNIVERSAL_TIME
 	u64 GetAdjustedUTC() const
 	{
 		return Common::Timer::GetTimeSinceJan1970() - wii_bias + utcdiff;
 	}
 
-	// Store the difference between what the wii thinks is UTC and
+	// Store the difference between what the Wii thinks is UTC and
 	// what the host OS thinks
 	void SetAdjustedUTC(u64 wii_utc)
 	{

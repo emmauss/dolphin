@@ -82,7 +82,8 @@ u32 DSPHLE::DSP_UpdateRate()
 
 void DSPHLE::SendMailToDSP(u32 _uMail)
 {
-	if (m_pUCode != nullptr) {
+	if (m_pUCode != nullptr)
+	{
 		DEBUG_LOG(DSP_MAIL, "CPU writes 0x%08x", _uMail);
 		m_pUCode->HandleMail(_uMail);
 	}
@@ -184,7 +185,7 @@ void DSPHLE::DoState(PointerWrap &p)
 	m_MailHandler.DoState(p);
 }
 
-// Mailbox fuctions
+// Mailbox functions
 unsigned short DSPHLE::DSP_ReadMailBoxHigh(bool _CPUMailbox)
 {
 	if (_CPUMailbox)
@@ -236,7 +237,7 @@ void DSPHLE::DSP_WriteMailBoxLow(bool _CPUMailbox, unsigned short _Value)
 	}
 }
 
-// Other DSP fuctions
+// Other DSP functions
 u16 DSPHLE::DSP_WriteControlRegister(unsigned short _Value)
 {
 	DSP::UDSPControl Temp(_Value);

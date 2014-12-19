@@ -2,13 +2,19 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include <thread>
+
 #include "AudioCommon/aldlist.h"
 #include "AudioCommon/DPL2Decoder.h"
 #include "AudioCommon/OpenALStream.h"
-#include "Common/StdThread.h"
 #include "Common/Thread.h"
+#include "Core/ConfigManager.h"
 
 #if defined HAVE_OPENAL && HAVE_OPENAL
+
+#ifdef _WIN32
+#pragma comment(lib, "openal32.lib")
+#endif
 
 static soundtouch::SoundTouch soundTouch;
 
@@ -122,7 +128,7 @@ void OpenALStream::SoundLoop()
 {
 	Common::SetCurrentThreadName("Audio thread - openal");
 
-	bool surround_capable = Core::g_CoreStartupParameter.bDPL2Decoder;
+	bool surround_capable = SConfig::GetInstance().m_LocalCoreStartupParameter.bDPL2Decoder;
 #if defined(__APPLE__)
 	bool float32_capable = false;
 	const ALenum AL_FORMAT_STEREO_FLOAT32 = 0;
@@ -134,7 +140,7 @@ void OpenALStream::SoundLoop()
 #endif
 
 	u32 ulFrequency = m_mixer->GetSampleRate();
-	numBuffers = Core::g_CoreStartupParameter.iLatency + 2; // OpenAL requires a minimum of two buffers
+	numBuffers = SConfig::GetInstance().m_LocalCoreStartupParameter.iLatency + 2; // OpenAL requires a minimum of two buffers
 
 	memset(uiBuffers, 0, numBuffers * sizeof(ALuint));
 	uiSource = 0;
@@ -218,8 +224,6 @@ void OpenALStream::SoundLoop()
 			// many silence samples.  These do not need to be timestretched.
 			if (rate > 0.10)
 			{
-				// Adjust SETTING_SEQUENCE_MS to balance between lag vs hollow audio
-				soundTouch.setSetting(SETTING_SEQUENCE_MS, (int)(1 / (rate * rate)));
 				soundTouch.setTempo(rate);
 				if (rate > 10)
 				{

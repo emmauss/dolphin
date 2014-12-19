@@ -3,8 +3,8 @@
 // Refer to the license.txt file included.
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileSearch.h"
 #include "Common/FileUtil.h"
 #include "Common/NandPaths.h"
@@ -15,10 +15,7 @@
 #include "Core/IPC_HLE/WII_IPC_HLE_Device_FileIO.h"
 #include "Core/IPC_HLE/WII_IPC_HLE_Device_fs.h"
 
-#define MAX_NAME  12
-
 static Common::replace_v replacements;
-
 
 CWII_IPC_HLE_Device_fs::CWII_IPC_HLE_Device_fs(u32 _DeviceID, const std::string& _rDeviceName)
 	: IWII_IPC_HLE_Device(_DeviceID, _rDeviceName)
@@ -84,9 +81,9 @@ bool CWII_IPC_HLE_Device_fs::IOCtlV(u32 _CommandAddress)
 	{
 	case IOCTLV_READ_DIR:
 		{
-			// the wii uses this function to define the type (dir or file)
-			std::string DirName(HLE_IPC_BuildFilename((const char*)Memory::GetPointer(
-				CommandBuffer.InBuffer[0].m_Address), CommandBuffer.InBuffer[0].m_Size));
+			// the Wii uses this function to define the type (dir or file)
+			std::string DirName(HLE_IPC_BuildFilename(Memory::GetString(
+				CommandBuffer.InBuffer[0].m_Address, CommandBuffer.InBuffer[0].m_Size)));
 
 			INFO_LOG(WII_IPC_FILEIO, "FS: IOCTL_READ_DIR %s", DirName.c_str());
 
@@ -173,8 +170,8 @@ bool CWII_IPC_HLE_Device_fs::IOCtlV(u32 _CommandAddress)
 			// this command sucks because it asks of the number of used
 			// fsBlocks and inodes
 			// It should be correct, but don't count on it...
-			const char *relativepath = (const char*)Memory::GetPointer(CommandBuffer.InBuffer[0].m_Address);
-			std::string path(HLE_IPC_BuildFilename(relativepath, CommandBuffer.InBuffer[0].m_Size));
+			std::string relativepath = Memory::GetString(CommandBuffer.InBuffer[0].m_Address, CommandBuffer.InBuffer[0].m_Size);
+			std::string path(HLE_IPC_BuildFilename(relativepath));
 			u32 fsBlocks = 0;
 			u32 iNodes = 0;
 
@@ -184,8 +181,8 @@ bool CWII_IPC_HLE_Device_fs::IOCtlV(u32 _CommandAddress)
 				// LPFaint99: After I found that setting the number of inodes to the number of children + 1 for the directory itself
 				// I decided to compare with sneek which has the following 2 special cases which are
 				// Copyright (C) 2009-2011  crediar http://code.google.com/p/sneek/
-				if ((memcmp(relativepath, "/title/00010001", 16 ) == 0 ) ||
-					(memcmp(relativepath, "/title/00010005", 16) == 0 ))
+				if ((relativepath.compare(0, 16, "/title/00010001") == 0 ) ||
+				    (relativepath.compare(0, 16, "/title/00010005") == 0 ))
 				{
 					fsBlocks = 23; // size is size/0x4000
 					iNodes = 42; // empty folders return a FileCount of 1
@@ -286,7 +283,7 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 
 			u32 OwnerID = Memory::Read_U32(Addr); Addr += 4;
 			u16 GroupID = Memory::Read_U16(Addr); Addr += 2;
-			std::string DirName(HLE_IPC_BuildFilename((const char*)Memory::GetPointer(Addr), 64)); Addr += 64;
+			std::string DirName(HLE_IPC_BuildFilename(Memory::GetString(Addr, 64))); Addr += 64;
 			Addr += 9; // owner attribs, permission
 			u8 Attribs = Memory::Read_U8(Addr);
 
@@ -306,7 +303,7 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 
 			u32 OwnerID = Memory::Read_U32(Addr); Addr += 4;
 			u16 GroupID = Memory::Read_U16(Addr); Addr += 2;
-			std::string Filename = HLE_IPC_BuildFilename((const char*)Memory::GetPointer(_BufferIn), 64); Addr += 64;
+			std::string Filename = HLE_IPC_BuildFilename(Memory::GetString(_BufferIn, 64)); Addr += 64;
 			u8 OwnerPerm = Memory::Read_U8(Addr); Addr += 1;
 			u8 GroupPerm = Memory::Read_U8(Addr); Addr += 1;
 			u8 OtherPerm = Memory::Read_U8(Addr); Addr += 1;
@@ -332,7 +329,7 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 
 			u32 OwnerID = 0;
 			u16 GroupID = 0x3031; // this is also known as makercd, 01 (0x3031) for nintendo and 08 (0x3038) for MH3 etc
-			std::string Filename = HLE_IPC_BuildFilename((const char*)Memory::GetPointer(_BufferIn), 64);
+			std::string Filename = HLE_IPC_BuildFilename(Memory::GetString(_BufferIn, 64));
 			u8 OwnerPerm = 0x3;   // read/write
 			u8 GroupPerm = 0x3;   // read/write
 			u8 OtherPerm = 0x3;   // read/write
@@ -377,7 +374,7 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 			_dbg_assert_(WII_IPC_FILEIO, _BufferOutSize == 0);
 			int Offset = 0;
 
-			std::string Filename = HLE_IPC_BuildFilename((const char*)Memory::GetPointer(_BufferIn+Offset), 64);
+			std::string Filename = HLE_IPC_BuildFilename(Memory::GetString(_BufferIn+Offset, 64));
 			Offset += 64;
 			if (File::Delete(Filename))
 			{
@@ -401,10 +398,10 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 			_dbg_assert_(WII_IPC_FILEIO, _BufferOutSize == 0);
 			int Offset = 0;
 
-			std::string Filename = HLE_IPC_BuildFilename((const char*)Memory::GetPointer(_BufferIn+Offset), 64);
+			std::string Filename = HLE_IPC_BuildFilename(Memory::GetString(_BufferIn+Offset, 64));
 			Offset += 64;
 
-			std::string FilenameRename = HLE_IPC_BuildFilename((const char*)Memory::GetPointer(_BufferIn+Offset), 64);
+			std::string FilenameRename = HLE_IPC_BuildFilename(Memory::GetString(_BufferIn+Offset, 64));
 			Offset += 64;
 
 			// try to make the basis directory
@@ -438,7 +435,7 @@ s32 CWII_IPC_HLE_Device_fs::ExecuteCommand(u32 _Parameter, u32 _BufferIn, u32 _B
 			u32 Addr = _BufferIn;
 			u32 OwnerID = Memory::Read_U32(Addr); Addr += 4;
 			u16 GroupID = Memory::Read_U16(Addr); Addr += 2;
-			std::string Filename(HLE_IPC_BuildFilename((const char*)Memory::GetPointer(Addr), 64)); Addr += 64;
+			std::string Filename(HLE_IPC_BuildFilename(Memory::GetString(Addr, 64))); Addr += 64;
 			u8 OwnerPerm = Memory::Read_U8(Addr); Addr++;
 			u8 GroupPerm = Memory::Read_U8(Addr); Addr++;
 			u8 OtherPerm = Memory::Read_U8(Addr); Addr++;
@@ -576,7 +573,8 @@ void CWII_IPC_HLE_Device_fs::DoState(PointerWrap& p)
 				File::IOFile handle(entry.physicalName, "rb");
 				char buf[65536];
 				u32 count = size;
-				while (count > 65536) {
+				while (count > 65536)
+				{
 					handle.ReadArray(&buf[0], 65536);
 					p.DoArray(&buf[0], 65536);
 					count -= 65536;

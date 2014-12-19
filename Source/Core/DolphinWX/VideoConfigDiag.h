@@ -97,7 +97,7 @@ protected:
 			if (new_backend->GetName() == "Software Renderer")
 			{
 				do_switch = (wxYES == wxMessageBox(_("Software rendering is an order of magnitude slower than using the other backends.\nIt's only useful for debugging purposes.\nDo you really want to enable software rendering? If unsure, select 'No'."),
-							_("Warning"), wxYES_NO | wxNO_DEFAULT | wxICON_EXCLAMATION, wxGetActiveWindow()));
+							_("Warning"), wxYES_NO | wxNO_DEFAULT | wxICON_EXCLAMATION, wxWindow::FindFocus()));
 			}
 
 			if (do_switch)
@@ -165,6 +165,20 @@ protected:
 		ev.Skip();
 	}
 
+	void Event_StereoSep(wxCommandEvent &ev)
+	{
+		vconfig.iStereoSeparation = ev.GetInt();
+
+		ev.Skip();
+	}
+
+	void Event_StereoFoc(wxCommandEvent &ev)
+	{
+		vconfig.iStereoConvergence = ev.GetInt();
+
+		ev.Skip();
+	}
+
 	void Event_ClickClose(wxCommandEvent&);
 	void Event_Close(wxCloseEvent&);
 
@@ -175,10 +189,6 @@ protected:
 		choice_aamode->Enable(vconfig.backend_info.AAModes.size() > 1);
 		text_aamode->Enable(vconfig.backend_info.AAModes.size() > 1);
 
-		// Borderless Fullscreen
-		borderless_fullscreen->Enable(vconfig.backend_info.bSupportsExclusiveFullscreen);
-		borderless_fullscreen->Show(vconfig.backend_info.bSupportsExclusiveFullscreen);
-
 		// EFB copy
 		efbcopy_texture->Enable(vconfig.bEFBCopyEnable);
 		efbcopy_ram->Enable(vconfig.bEFBCopyEnable);
@@ -188,6 +198,35 @@ protected:
 		virtual_xfb->Enable(vconfig.bUseXFB);
 		real_xfb->Enable(vconfig.bUseXFB);
 
+		// PP Shaders
+		if (choice_ppshader)
+			choice_ppshader->Enable(vconfig.iStereoMode != STEREO_ANAGLYPH);
+		if (button_config_pp)
+			button_config_pp->Enable(vconfig.iStereoMode != STEREO_ANAGLYPH);
+
+		// Things which shouldn't be changed during emulation
+		if (Core::IsRunning())
+		{
+			choice_backend->Disable();
+			label_backend->Disable();
+
+			//D3D only
+			if (vconfig.backend_info.Adapters.size())
+			{
+				choice_adapter->Disable();
+				label_adapter->Disable();
+			}
+
+#ifndef __APPLE__
+			// This isn't supported on OSX.
+
+			choice_display_resolution->Disable();
+			label_display_resolution->Disable();
+#endif
+
+			progressive_scan_checkbox->Disable();
+			render_to_main_checkbox->Disable();
+		}
 		ev.Skip();
 	}
 
@@ -204,13 +243,21 @@ protected:
 	void CreateDescriptionArea(wxPanel* const page, wxBoxSizer* const sizer);
 
 	wxChoice* choice_backend;
+	wxChoice* choice_adapter;
 	wxChoice* choice_display_resolution;
+
+	wxStaticText* label_backend;
+	wxStaticText* label_adapter;
+
 	wxStaticText* text_aamode;
 	SettingChoice* choice_aamode;
+
+	wxStaticText* label_display_resolution;
 
 	wxButton* button_config_pp;
 
 	SettingCheckBox* borderless_fullscreen;
+	SettingCheckBox* render_to_main_checkbox;
 
 	SettingRadioButton* efbcopy_texture;
 	SettingRadioButton* efbcopy_ram;
@@ -218,6 +265,10 @@ protected:
 
 	SettingRadioButton* virtual_xfb;
 	SettingRadioButton* real_xfb;
+
+	wxCheckBox* progressive_scan_checkbox;
+
+	wxChoice* choice_ppshader;
 
 	std::map<wxWindow*, wxString> ctrl_descs; // maps setting controls to their descriptions
 	std::map<wxWindow*, wxStaticText*> desc_texts; // maps dialog tabs (which are the parents of the setting controls) to their description text objects

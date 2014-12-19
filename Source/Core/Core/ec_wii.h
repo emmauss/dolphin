@@ -41,7 +41,7 @@ public:
 	u32 getNgId()         {return Common::swap32(BootMiiKeysBin.ng_id);}
 	u32 getNgKeyId()      {return Common::swap32(BootMiiKeysBin.ng_key_id);}
 	const u8* getNgPriv() {return BootMiiKeysBin.ng_priv;}
-	const u8* getNgSig()  {return BootMiiKeysBin.ng_sig;};
+	const u8* getNgSig()  {return BootMiiKeysBin.ng_sig;}
 private:
 	void InitDefaults();
 
@@ -66,12 +66,16 @@ private:
 		u8 boot1_hash           [ 0x14]; // 0x100
 		u8 common_key           [ 0x10]; // 0x114
 		u32 ng_id;                       // 0x124
-		union {
-			struct {
+		union
+		{
+			struct
+			{
 				u8 ng_priv      [ 0x1e]; // 0x128
 				u8 pad1         [ 0x12];
 			};
-			struct {
+
+			struct
+			{
 				u8 pad2         [ 0x1c];
 				u8 nand_hmac    [ 0x14]; //0x144
 			};

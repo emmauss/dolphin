@@ -11,7 +11,7 @@
 
 #include "disasm.h"
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/MemoryUtil.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
@@ -41,47 +41,27 @@ using namespace Gen;
 
 	void JitBaseBlockCache::Init()
 	{
+		if (m_initialized)
+		{
+			PanicAlert("JitBaseBlockCache::Init() - iCache is already initialized");
+			return;
+		}
+
 #if defined USE_OPROFILE && USE_OPROFILE
 		agent = op_open_agent();
 #endif
-		blocks = new JitBlock[MAX_NUM_BLOCKS];
-		blockCodePointers = new const u8*[MAX_NUM_BLOCKS];
-		if (iCache == nullptr && iCacheEx == nullptr && iCacheVMEM == nullptr)
-		{
-			iCache = new u8[JIT_ICACHE_SIZE];
-			iCacheEx = new u8[JIT_ICACHEEX_SIZE];
-			iCacheVMEM = new u8[JIT_ICACHE_SIZE];
-		}
-		else
-		{
-			PanicAlert("JitBaseBlockCache::Init() - iCache is already initialized");
-		}
-		if (iCache == nullptr || iCacheEx == nullptr || iCacheVMEM == nullptr)
-		{
-			PanicAlert("JitBaseBlockCache::Init() - unable to allocate iCache");
-		}
-		memset(iCache, JIT_ICACHE_INVALID_BYTE, JIT_ICACHE_SIZE);
-		memset(iCacheEx, JIT_ICACHE_INVALID_BYTE, JIT_ICACHEEX_SIZE);
-		memset(iCacheVMEM, JIT_ICACHE_INVALID_BYTE, JIT_ICACHE_SIZE);
+		iCache.fill(JIT_ICACHE_INVALID_BYTE);
+		iCacheEx.fill(JIT_ICACHE_INVALID_BYTE);
+		iCacheVMEM.fill(JIT_ICACHE_INVALID_BYTE);
 		Clear();
+
+		m_initialized = true;
 	}
 
 	void JitBaseBlockCache::Shutdown()
 	{
-		delete[] blocks;
-		delete[] blockCodePointers;
-		if (iCache != nullptr)
-			delete[] iCache;
-		iCache = nullptr;
-		if (iCacheEx != nullptr)
-			delete[] iCacheEx;
-		iCacheEx = nullptr;
-		if (iCacheVMEM != nullptr)
-			delete[] iCacheVMEM;
-		iCacheVMEM = nullptr;
-		blocks = nullptr;
-		blockCodePointers = nullptr;
 		num_blocks = 0;
+		m_initialized = false;
 #if defined USE_OPROFILE && USE_OPROFILE
 		op_close_agent(agent);
 #endif
@@ -101,7 +81,7 @@ using namespace Gen;
 		else
 			Core::DisplayMessage("Clearing code cache.", 3000);
 #endif
-
+		jit->js.fifoWriteAddresses.clear();
 		for (int i = 0; i < num_blocks; i++)
 		{
 			DestroyBlock(i, false);
@@ -112,7 +92,7 @@ using namespace Gen;
 		valid_block.ClearAll();
 
 		num_blocks = 0;
-		memset(blockCodePointers, 0, sizeof(u8*)*MAX_NUM_BLOCKS);
+		blockCodePointers.fill(nullptr);
 	}
 
 	void JitBaseBlockCache::Reset()
@@ -135,9 +115,9 @@ using namespace Gen;
 	{
 		// check if any endpoint is inside the other range
 		if ((s1 >= s2 && s1 <= e2) ||
-			(e1 >= s2 && e1 <= e2) ||
-			(s2 >= s1 && s2 <= e1) ||
-			(e2 >= s1 && e2 <= e1))
+		    (e1 >= s2 && e1 <= e2) ||
+		    (s2 >= s1 && s2 <= e1) ||
+		    (e2 >= s1 && e2 <= e1))
 			return true;
 		else
 			return false;
@@ -147,6 +127,7 @@ using namespace Gen;
 	{
 		JitBlock &b = blocks[num_blocks];
 		b.invalid = false;
+		b.memoryException = false;
 		b.originalAddress = em_address;
 		b.linkData.clear();
 		num_blocks++; //commit the current block
@@ -163,11 +144,16 @@ using namespace Gen;
 		// Convert the logical address to a physical address for the block map
 		u32 pAddr = b.originalAddress & 0x1FFFFFFF;
 
-		for (u32 i = 0; i < (b.originalSize + 7) / 8; ++i)
-			valid_block.Set(pAddr / 32 + i);
+		for (u32 block = pAddr / 32; block <= (pAddr + (b.originalSize - 1) * 4) / 32; ++block)
+			valid_block.Set(block);
 
 		block_map[std::make_pair(pAddr + 4 * b.originalSize - 1, pAddr)] = block_num;
-		if (block_link)
+
+		// Blocks where a memory exception (ISI) occurred in the instruction fetch have to
+		// execute the ISI handler as the next instruction. These blocks cannot be
+		// linked to other blocks.  The block will be recompiled after the ISI is handled
+		// and so we do not link other blocks to it either.
+		if (block_link && !b.memoryException)
 		{
 			for (const auto& e : b.linkData)
 			{
@@ -203,31 +189,31 @@ using namespace Gen;
 
 	const u8 **JitBaseBlockCache::GetCodePointers()
 	{
-		return blockCodePointers;
+		return blockCodePointers.data();
 	}
 
 	u32* JitBaseBlockCache::GetICachePtr(u32 addr)
 	{
 		if (addr & JIT_ICACHE_VMEM_BIT)
-			return (u32*)(jit->GetBlockCache()->iCacheVMEM + (addr & JIT_ICACHE_MASK));
+			return (u32*)(&jit->GetBlockCache()->iCacheVMEM[addr & JIT_ICACHE_MASK]);
 		else if (addr & JIT_ICACHE_EXRAM_BIT)
-			return (u32*)(jit->GetBlockCache()->iCacheEx + (addr & JIT_ICACHEEX_MASK));
+			return (u32*)(&jit->GetBlockCache()->iCacheEx[addr & JIT_ICACHEEX_MASK]);
 		else
-			return (u32*)(jit->GetBlockCache()->iCache + (addr & JIT_ICACHE_MASK));
+			return (u32*)(&jit->GetBlockCache()->iCache[addr & JIT_ICACHE_MASK]);
 	}
 
 	int JitBaseBlockCache::GetBlockNumberFromStartAddress(u32 addr)
 	{
-		if (!blocks)
-			return -1;
-		u32 inst;
-		inst = *GetICachePtr(addr);
+		u32 inst = *GetICachePtr(addr);
 		if (inst & 0xfc000000) // definitely not a JIT block
 			return -1;
+
 		if ((int)inst >= num_blocks)
 			return -1;
+
 		if (blocks[inst].originalAddress != addr)
 			return -1;
+
 		return inst;
 	}
 
@@ -264,19 +250,19 @@ using namespace Gen;
 		}
 	}
 
-	using namespace std;
-
 	void JitBaseBlockCache::LinkBlock(int i)
 	{
 		LinkBlockExits(i);
 		JitBlock &b = blocks[i];
-		pair<multimap<u32, int>::iterator, multimap<u32, int>::iterator> ppp;
 		// equal_range(b) returns pair<iterator,iterator> representing the range
 		// of element with key b
-		ppp = links_to.equal_range(b.originalAddress);
+		auto ppp = links_to.equal_range(b.originalAddress);
+
 		if (ppp.first == ppp.second)
 			return;
-		for (multimap<u32, int>::iterator iter = ppp.first; iter != ppp.second; ++iter) {
+
+		for (auto iter = ppp.first; iter != ppp.second; ++iter)
+		{
 			// PanicAlert("Linking block %i to block %i", iter->second, i);
 			LinkBlockExits(iter->second);
 		}
@@ -285,11 +271,13 @@ using namespace Gen;
 	void JitBaseBlockCache::UnlinkBlock(int i)
 	{
 		JitBlock &b = blocks[i];
-		pair<multimap<u32, int>::iterator, multimap<u32, int>::iterator> ppp;
-		ppp = links_to.equal_range(b.originalAddress);
+		auto ppp = links_to.equal_range(b.originalAddress);
+
 		if (ppp.first == ppp.second)
 			return;
-		for (multimap<u32, int>::iterator iter = ppp.first; iter != ppp.second; ++iter) {
+
+		for (auto iter = ppp.first; iter != ppp.second; ++iter)
+		{
 			JitBlock &sourceBlock = blocks[iter->second];
 			for (auto& e : sourceBlock.linkData)
 			{
@@ -325,7 +313,7 @@ using namespace Gen;
 		WriteDestroyBlock(b.checkedEntry, b.originalAddress);
 	}
 
-	void JitBaseBlockCache::InvalidateICache(u32 address, const u32 length)
+	void JitBaseBlockCache::InvalidateICache(u32 address, const u32 length, bool forced)
 	{
 		// Convert the logical address to a physical address for the block map
 		u32 pAddr = address & 0x1FFFFFFF;
@@ -344,7 +332,7 @@ using namespace Gen;
 		// !! this works correctly under assumption that any two overlapping blocks end at the same address
 		if (destroy_block)
 		{
-			std::map<pair<u32,u32>, u32>::iterator it1 = block_map.lower_bound(std::make_pair(pAddr, 0)), it2 = it1;
+			std::map<std::pair<u32,u32>, u32>::iterator it1 = block_map.lower_bound(std::make_pair(pAddr, 0)), it2 = it1;
 			while (it2 != block_map.end() && it2->first.second < pAddr + length)
 			{
 				JitBlock &b = blocks[it2->second];
@@ -356,16 +344,31 @@ using namespace Gen;
 			{
 				block_map.erase(it1, it2);
 			}
+
+			// If the code was actually modified, we need to clear the relevant entries from the
+			// FIFO write address cache, so we don't end up with FIFO checks in places they shouldn't
+			// be (this can clobber flags, and thus break any optimization that relies on flags
+			// being in the right place between instructions).
+			if (!forced)
+			{
+				for (u32 i = address; i < address + length; i += 4)
+					jit->js.fifoWriteAddresses.erase(i);
+			}
 		}
 	}
+
 	void JitBlockCache::WriteLinkBlock(u8* location, const u8* address)
 	{
 		XEmitter emit(location);
-		emit.JMP(address, true);
+		if (*location == 0xE8)
+			emit.CALL(address);
+		else
+			emit.JMP(address, true);
 	}
+
 	void JitBlockCache::WriteDestroyBlock(const u8* location, u32 address)
 	{
 		XEmitter emit((u8 *)location);
-		emit.MOV(32, M(&PC), Imm32(address));
+		emit.MOV(32, PPCSTATE(pc), Imm32(address));
 		emit.JMP(jit->GetAsmRoutines()->dispatcher, true);
 	}

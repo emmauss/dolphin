@@ -27,8 +27,6 @@
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/ControllerInterface/Device.h"
 
-class wxTimerEvent;
-
 static void DrawCenteredRectangle(wxDC &dc, int x, int y, int w, int h)
 {
 	x -= w / 2;
@@ -43,7 +41,7 @@ static void DrawCenteredRectangle(wxDC &dc, int x, int y, int w, int h)
 
 #define COORD_VIS_SIZE 4
 
-static void DrawCoordinate(wxDC &dc, double x, double y)
+static void DrawCoordinate(wxDC &dc, ControlState x, ControlState y)
 {
 	int xc = VIS_COORD(x);
 	int yc = VIS_COORD(y);
@@ -60,7 +58,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 	{
 		// this is starting to be a mess combining all these in one case
 
-		double x = 0, y = 0, z = 0;
+		ControlState x = 0, y = 0, z = 0;
 
 		switch (g->control_group->type)
 		{
@@ -103,7 +101,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 			dc.SetPen(LightGrayPen);
 
 			// polygon offset
-			float max
+			ControlState max
 				, diagonal
 				, box = 64
 				, d_of = box / 256.0
@@ -111,18 +109,18 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 
 			if (g->control_group->name == "Main Stick")
 			{
-				max = (87.0f / 127.0f) * 100;
-				diagonal = (55.0f / 127.0f) * 100;
+				max = (87.0 / 127.0) * 100;
+				diagonal = (55.0 / 127.0) * 100;
 			}
 			else if (g->control_group->name == "C-Stick")
 			{
-				max = (74.0f / 127.0f) * 100;
-				diagonal = (46.0f / 127.0f) * 100;
+				max = (74.0 / 127.0) * 100;
+				diagonal = (46.0 / 127.0) * 100;
 			}
 			else
 			{
-				max = (82.0f / 127.0f) * 100;
-				diagonal = (58.0f / 127.0f) * 100;
+				max = (82.0 / 127.0) * 100;
+				diagonal = (58.0 / 127.0) * 100;
 			}
 
 			// polygon corners
@@ -153,7 +151,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 
 		// raw dot
 		{
-		float xx, yy;
+		ControlState xx, yy;
 		xx = g->control_group->controls[3]->control_ref->State();
 		xx -= g->control_group->controls[2]->control_ref->State();
 		yy = g->control_group->controls[1]->control_ref->State();
@@ -165,7 +163,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 		}
 
 		// adjusted dot
-		if (x != 0 && y != 0)
+		if (x != 0 || y != 0)
 		{
 			dc.SetPen(*wxRED_PEN);
 			dc.SetBrush(*wxRED_BRUSH);
@@ -177,9 +175,9 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 	break;
 	case GROUP_TYPE_FORCE :
 	{
-		double raw_dot[3];
-		double adj_dot[3];
-		const float deadzone = g->control_group->settings[0]->value;
+		ControlState raw_dot[3];
+		ControlState adj_dot[3];
+		const ControlState deadzone = g->control_group->settings[0]->value;
 
 		// adjusted
 		((ControllerEmu::Force*)g->control_group)->GetState(adj_dot);
@@ -287,7 +285,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 		dc.SetPen(*wxGREY_PEN);
 		ControlState deadzone =  g->control_group->settings[0]->value;
 
-		double* const trigs = new double[trigger_count];
+		ControlState* const trigs = new ControlState[trigger_count];
 		((ControllerEmu::Triggers*)g->control_group)->GetState(trigs);
 
 		for (unsigned int n = 0; n < trigger_count; ++n)
@@ -363,7 +361,7 @@ static void DrawControlGroupBox(wxDC &dc, ControlGroupBox *g)
 		dc.SetBrush(*wxGREY_BRUSH);
 		dc.DrawRectangle(31 + state * 30, 0, 2, 14);
 
-		double adj_state;
+		ControlState adj_state;
 		((ControllerEmu::Slider*)g->control_group)->GetState(&adj_state);
 		if (state)
 		{

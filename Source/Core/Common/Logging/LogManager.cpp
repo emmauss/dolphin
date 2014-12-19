@@ -10,9 +10,10 @@
 #include <string>
 
 #ifdef ANDROID
-#include "Core/Host.h"
+#include <android/log.h>
 #endif
 #include "Common/FileUtil.h"
+#include "Common/IniFile.h"
 #include "Common/StringUtil.h"
 #include "Common/Timer.h"
 #include "Common/Logging/ConsoleListener.h"
@@ -86,15 +87,23 @@ LogManager::LogManager()
 	m_consoleLog = new ConsoleListener();
 	m_debuggerLog = new DebuggerLogListener();
 
+	IniFile ini;
+	ini.Load(File::GetUserPath(F_LOGGERCONFIG_IDX));
+	IniFile::Section* logs = ini.GetOrCreateSection("Logs");
 	for (LogContainer* container : m_Log)
 	{
-		container->SetEnable(true);
-		container->AddListener(m_fileLog);
-		container->AddListener(m_consoleLog);
+		bool enable;
+		logs->Get(container->GetShortName(), &enable, false);
+		container->SetEnable(enable);
+		if (enable)
+		{
+			container->AddListener(m_fileLog);
+			container->AddListener(m_consoleLog);
 #ifdef _MSC_VER
-		if (IsDebuggerPresent())
-			container->AddListener(m_debuggerLog);
+			if (IsDebuggerPresent())
+				container->AddListener(m_debuggerLog);
 #endif
+		}
 	}
 }
 
@@ -132,7 +141,7 @@ void LogManager::Log(LogTypes::LOG_LEVELS level, LogTypes::LOG_TYPE type,
 	                                   LogTypes::LOG_LEVEL_TO_CHAR[(int)level],
 	                                   log->GetShortName().c_str(), temp);
 #ifdef ANDROID
-	Host_SysMessage(msg.c_str());
+	__android_log_write(ANDROID_LOG_INFO, "Dolphinemu", msg.c_str());
 #endif
 	log->Trigger(level, msg.c_str());
 }

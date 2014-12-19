@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 class PointerWrap;
 
@@ -84,12 +84,12 @@ public:
 	virtual void DoState(PointerWrap& p) {}
 
 
-	int GetDeviceNumber()
+	int GetDeviceNumber() const
 	{
 		return m_iDeviceNumber;
 	}
 
-	SIDevices GetDeviceType()
+	SIDevices GetDeviceType() const
 	{
 		return m_deviceType;
 	}

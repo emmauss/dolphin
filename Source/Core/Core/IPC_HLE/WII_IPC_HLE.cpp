@@ -25,8 +25,8 @@ They will also generate a true or false return for UpdateInterrupts() in WII_IPC
 #include <string>
 
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/Thread.h"
 
@@ -260,12 +260,8 @@ IWII_IPC_HLE_Device* AccessDeviceByID(u32 _ID)
 IWII_IPC_HLE_Device* CreateFileIO(u32 _DeviceID, const std::string& _rDeviceName)
 {
 	// scan device name and create the right one
-	IWII_IPC_HLE_Device* pDevice = nullptr;
-
 	INFO_LOG(WII_IPC_FILEIO, "IOP: Create FileIO %s", _rDeviceName.c_str());
-	pDevice = new CWII_IPC_HLE_Device_FileIO(_DeviceID, _rDeviceName);
-
-	return pDevice;
+	return new CWII_IPC_HLE_Device_FileIO(_DeviceID, _rDeviceName);
 }
 
 
@@ -369,8 +365,7 @@ void ExecuteCommand(u32 _Address)
 		u32 Mode = Memory::Read_U32(_Address + 0x10);
 		DeviceID = getFreeDeviceId();
 
-		std::string DeviceName;
-		Memory::GetString(DeviceName, Memory::Read_U32(_Address + 0xC));
+		std::string DeviceName = Memory::GetString(Memory::Read_U32(_Address + 0xC));
 
 		WARN_LOG(WII_IPC_HLE, "Trying to open %s as %d", DeviceName.c_str(), DeviceID);
 		if (DeviceID >= 0)

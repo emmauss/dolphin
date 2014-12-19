@@ -8,6 +8,7 @@
 #include <cinttypes>
 
 #include "Common/x64Emitter.h"
+#include "Core/PowerPC/PPCAnalyst.h"
 
 enum FlushMode
 {
@@ -43,27 +44,43 @@ protected:
 
 	virtual const int *GetAllocationOrder(size_t& count) = 0;
 
+	virtual BitSet32 GetRegUtilization() = 0;
+	virtual BitSet32 CountRegsIn(size_t preg, u32 lookahead) = 0;
+
 	Gen::XEmitter *emit;
+
+	float ScoreRegister(Gen::X64Reg xreg);
 
 public:
 	RegCache();
-
 	virtual ~RegCache() {}
+
 	void Start();
 
 	void DiscardRegContentsIfCached(size_t preg);
-	void SetEmitter(Gen::XEmitter *emitter) {emit = emitter;}
+	void SetEmitter(Gen::XEmitter *emitter)
+	{
+		emit = emitter;
+	}
 
 	void FlushR(Gen::X64Reg reg);
-	void FlushR(Gen::X64Reg reg, Gen::X64Reg reg2) {FlushR(reg); FlushR(reg2);}
-	void FlushLockX(Gen::X64Reg reg) {
+	void FlushR(Gen::X64Reg reg, Gen::X64Reg reg2)
+	{
+		FlushR(reg);
+		FlushR(reg2);
+	}
+
+	void FlushLockX(Gen::X64Reg reg)
+	{
 		FlushR(reg);
 		LockX(reg);
 	}
-	void FlushLockX(Gen::X64Reg reg1, Gen::X64Reg reg2) {
+	void FlushLockX(Gen::X64Reg reg1, Gen::X64Reg reg2)
+	{
 		FlushR(reg1); FlushR(reg2);
 		LockX(reg1); LockX(reg2);
 	}
+
 	void Flush(FlushMode mode = FLUSH_ALL);
 	void Flush(PPCAnalyst::CodeOp *op) {Flush();}
 	int SanityCheck() const;
@@ -76,13 +93,17 @@ public:
 	virtual void StoreRegister(size_t preg, Gen::OpArg newLoc) = 0;
 	virtual void LoadRegister(size_t preg, Gen::X64Reg newLoc) = 0;
 
-	const Gen::OpArg &R(size_t preg) const {return regs[preg].location;}
+	const Gen::OpArg &R(size_t preg) const
+	{
+		return regs[preg].location;
+	}
+
 	Gen::X64Reg RX(size_t preg) const
 	{
 		if (IsBound(preg))
 			return regs[preg].location.GetSimpleReg();
 
-		PanicAlert("Not so simple - %" PRIx64, preg);
+		PanicAlert("Not so simple - %u", (unsigned int) preg);
 		return Gen::INVALID_REG;
 	}
 	virtual Gen::OpArg GetDefaultLocation(size_t reg) const = 0;
@@ -105,6 +126,7 @@ public:
 
 
 	Gen::X64Reg GetFreeXReg();
+	int NumFreeRegisters();
 };
 
 class GPRRegCache : public RegCache
@@ -115,6 +137,8 @@ public:
 	Gen::OpArg GetDefaultLocation(size_t reg) const override;
 	const int* GetAllocationOrder(size_t& count) override;
 	void SetImmediate32(size_t preg, u32 immValue);
+	BitSet32 GetRegUtilization() override;
+	BitSet32 CountRegsIn(size_t preg, u32 lookahead) override;
 };
 
 
@@ -125,4 +149,6 @@ public:
 	void LoadRegister(size_t preg, Gen::X64Reg newLoc) override;
 	const int* GetAllocationOrder(size_t& count) override;
 	Gen::OpArg GetDefaultLocation(size_t reg) const override;
+	BitSet32 GetRegUtilization() override;
+	BitSet32 CountRegsIn(size_t preg, u32 lookahead) override;
 };

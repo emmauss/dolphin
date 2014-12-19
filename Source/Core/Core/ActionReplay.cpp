@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Common/Logging/LogManager.h"
 
@@ -170,14 +170,20 @@ void LoadCodes(const IniFile& globalIni, const IniFile& localIni, bool forceLoad
 					AREntry op;
 					bool success_addr = TryParse(std::string("0x") + pieces[0], &op.cmd_addr);
 					bool success_val = TryParse(std::string("0x") + pieces[1], &op.value);
-					if (!(success_addr | success_val)) {
-						PanicAlertT("Action Replay Error: invalid AR code line: %s", line.c_str());
-						if (!success_addr) PanicAlertT("The address is invalid");
-						if (!success_val) PanicAlertT("The value is invalid");
+
+					if (success_addr && success_val)
+					{
+						currentCode.ops.push_back(op);
 					}
 					else
 					{
-						currentCode.ops.push_back(op);
+						PanicAlertT("Action Replay Error: invalid AR code line: %s", line.c_str());
+
+						if (!success_addr)
+							PanicAlertT("The address is invalid");
+
+						if (!success_val)
+							PanicAlertT("The value is invalid");
 					}
 				}
 				else

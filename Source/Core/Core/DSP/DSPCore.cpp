@@ -23,7 +23,7 @@
 
    ====================================================================*/
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/Event.h"
 #include "Common/FileUtil.h"
 #include "Common/Hash.h"
@@ -185,10 +185,12 @@ void DSPCore_Shutdown()
 
 	core_state = DSPCORE_STOP;
 
-	if (dspjit) {
+	if (dspjit)
+	{
 		delete dspjit;
 		dspjit = nullptr;
 	}
+
 	DSPCore_FreeMemoryPages();
 
 	g_dsp_cap.reset();

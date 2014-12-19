@@ -2,9 +2,11 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
+
+#include "Core/ConfigManager.h"
 
 #include "VideoBackends/Software/BPMemLoader.h"
 #include "VideoBackends/Software/DebugUtil.h"
@@ -253,7 +255,7 @@ void OnFrameEnd(u32 width, u32 height)
 {
 	if (!g_bSkipCurrentFrame)
 	{
-		if (g_SWVideoConfig.bDumpFrames)
+		if (SConfig::GetInstance().m_DumpFrames)
 		{
 			DumpColorTexture(StringFromFormat("%sframe%i_color.png",
 					File::GetUserPath(D_DUMPFRAMES_IDX).c_str(), swstats.frameCount), width, height);

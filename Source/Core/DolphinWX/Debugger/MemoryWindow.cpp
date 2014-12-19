@@ -24,7 +24,7 @@
 #include <wx/windowid.h>
 #include <wx/wxcrtvararg.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
 #include "Common/StringUtil.h"
@@ -40,11 +40,9 @@
 #include "DolphinWX/Debugger/MemoryView.h"
 #include "DolphinWX/Debugger/MemoryWindow.h"
 
-class DebugInterface;
-
 enum
 {
-	IDM_MEM_ADDRBOX = 350,
+	IDM_MEM_ADDRBOX,
 	IDM_SYMBOLLIST,
 	IDM_SETVALBUTTON,
 	IDM_DUMP_MEMORY,
@@ -102,7 +100,7 @@ CMemoryWindow::CMemoryWindow(wxWindow* parent, wxWindowID id,
 	sizerRight->Add(new wxButton(this, IDM_DUMP_MEMORY, _("&Dump MRAM")));
 	sizerRight->Add(new wxButton(this, IDM_DUMP_MEM2, _("&Dump EXRAM")));
 
-	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bTLBHack == true)
+	if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
 		sizerRight->Add(new wxButton(this, IDM_DUMP_FAKEVMEM, _("&Dump FakeVMEM")));
 
 	wxStaticBoxSizer* sizerSearchType = new wxStaticBoxSizer(wxVERTICAL, this, _("Search"));
@@ -278,7 +276,7 @@ void CMemoryWindow::OnDumpMem2( wxCommandEvent& event )
 // Write fake vmem to file
 void CMemoryWindow::OnDumpFakeVMEM( wxCommandEvent& event )
 {
-	DumpArray(File::GetUserPath(F_FAKEVMEMDUMP_IDX), Memory::m_pVirtualFakeVMEM, Memory::FAKEVMEM_SIZE);
+	DumpArray(File::GetUserPath(F_FAKEVMEMDUMP_IDX), Memory::m_pFakeVMEM, Memory::FAKEVMEM_SIZE);
 }
 
 void CMemoryWindow::U8(wxCommandEvent& event)
@@ -425,10 +423,7 @@ void CMemoryWindow::onSearch(wxCommandEvent& event)
 			{
 				//Match was found
 				wxMessageBox(_("A match was found. Placing viewer at the offset."));
-				wxChar tmpwxstr[128] = {0};
-				wxSprintf(tmpwxstr, "%08x", i);
-				wxString tmpwx(tmpwxstr);
-				addrbox->SetValue(tmpwx);
+				addrbox->SetValue(wxString::Format("%08x", i));
 				//memview->curAddress = i;
 				//memview->Refresh();
 				OnAddrBoxChange(event);

@@ -2,7 +2,7 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/HW/Memmap.h"
@@ -62,11 +62,6 @@ void SetScissor()
 	g_renderer->SetScissorRect(rc);
 }
 
-void SetLineWidth()
-{
-	g_renderer->SetLineWidth();
-}
-
 void SetDepthMode()
 {
 	g_renderer->SetDepthMode();
@@ -120,9 +115,9 @@ void CopyEFB(u32 dstAddr, const EFBRectangle& srcRect,
 */
 void ClearScreen(const EFBRectangle &rc)
 {
-	bool colorEnable = bpmem.blendmode.colorupdate;
-	bool alphaEnable = bpmem.blendmode.alphaupdate;
-	bool zEnable = bpmem.zmode.updateenable;
+	bool colorEnable = (bpmem.blendmode.colorupdate != 0);
+	bool alphaEnable = (bpmem.blendmode.alphaupdate != 0);
+	bool zEnable = (bpmem.zmode.updateenable != 0);
 	auto pixel_format = bpmem.zcontrol.pixel_format;
 
 	// (1): Disable unused color channels

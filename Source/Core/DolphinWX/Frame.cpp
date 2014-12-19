@@ -2,14 +2,6 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-
-// CFrame is the main parent window. Inside CFrame there is an m_Panel that is
-// the parent for the rendering window (when we render to the main window). In
-// Windows the rendering window is created by giving CreateWindow()
-// m_Panel->GetHandle() as parent window and creating a new child window to
-// m_Panel. The new child window handle that is returned by CreateWindow() can
-// be accessed from Core::GetWindowHandle().
-
 #ifdef __APPLE__
 #include <Cocoa/Cocoa.h>
 #endif
@@ -44,7 +36,7 @@
 #include <wx/aui/auibook.h>
 #include <wx/aui/framemanager.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/Thread.h"
 #include "Common/Logging/ConsoleListener.h"
@@ -67,6 +59,7 @@
 
 #include "InputCommon/GCPadStatus.h"
 
+#include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/RenderBase.h"
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoConfig.h"
@@ -77,6 +70,24 @@ extern "C" {
 #include "DolphinWX/resources/Dolphin.c" // NOLINT: Dolphin icon
 };
 
+int g_saveSlot = 1;
+
+#if defined(HAVE_X11) && HAVE_X11
+// X11Utils nastiness that's only used here
+namespace X11Utils {
+
+Window XWindowFromHandle(void *Handle)
+{
+	return GDK_WINDOW_XID(gtk_widget_get_window(GTK_WIDGET(Handle)));
+}
+
+Display *XDisplayFromHandle(void *Handle)
+{
+	return GDK_WINDOW_XDISPLAY(gtk_widget_get_window(GTK_WIDGET(Handle)));
+}
+
+}
+#endif
 
 CRenderFrame::CRenderFrame(wxFrame* parent, wxWindowID id, const wxString& title,
 		const wxPoint& pos, const wxSize& size, long style)
@@ -193,19 +204,23 @@ WXLRESULT CRenderFrame::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lPa
 
 bool CRenderFrame::ShowFullScreen(bool show, long style)
 {
-	if (show)
+#if defined WIN32
+	if (show && !g_Config.bBorderlessFullscreen)
 	{
 		// OpenGL requires the pop-up style to activate exclusive mode.
 		SetWindowStyle((GetWindowStyle() & ~wxDEFAULT_FRAME_STYLE) | wxPOPUP_WINDOW);
 	}
+#endif
 
 	bool result = wxTopLevelWindow::ShowFullScreen(show, style);
 
+#if defined WIN32
 	if (!show)
 	{
 		// Restore the default style.
 		SetWindowStyle((GetWindowStyle() & ~wxPOPUP_WINDOW) | wxDEFAULT_FRAME_STYLE);
 	}
+#endif
 
 	return result;
 }
@@ -214,7 +229,7 @@ bool CRenderFrame::ShowFullScreen(bool show, long style)
 // Notice that wxID_HELP will be processed for the 'About' menu and the toolbar
 // help button.
 
-const wxEventType wxEVT_HOST_COMMAND = wxNewEventType();
+wxDEFINE_EVENT(wxEVT_HOST_COMMAND, wxCommandEvent);
 
 BEGIN_EVENT_TABLE(CFrame, CRenderFrame)
 
@@ -236,13 +251,16 @@ EVT_MENU(IDM_RECORDREADONLY, CFrame::OnRecordReadOnly)
 EVT_MENU(IDM_TASINPUT, CFrame::OnTASInput)
 EVT_MENU(IDM_TOGGLE_PAUSEMOVIE, CFrame::OnTogglePauseMovie)
 EVT_MENU(IDM_SHOWLAG, CFrame::OnShowLag)
+EVT_MENU(IDM_SHOWFRAMECOUNT, CFrame::OnShowFrameCount)
+EVT_MENU(IDM_SHOWINPUTDISPLAY, CFrame::OnShowInputDisplay)
 EVT_MENU(IDM_FRAMESTEP, CFrame::OnFrameStep)
 EVT_MENU(IDM_SCREENSHOT, CFrame::OnScreenshot)
+EVT_MENU(IDM_TOGGLE_DUMPFRAMES, CFrame::OnToggleDumpFrames)
+EVT_MENU(IDM_TOGGLE_DUMPAUDIO, CFrame::OnToggleDumpAudio)
 EVT_MENU(wxID_PREFERENCES, CFrame::OnConfigMain)
 EVT_MENU(IDM_CONFIG_GFX_BACKEND, CFrame::OnConfigGFX)
 EVT_MENU(IDM_CONFIG_DSP_EMULATOR, CFrame::OnConfigDSP)
-EVT_MENU(IDM_CONFIG_PAD_PLUGIN, CFrame::OnConfigPAD)
-EVT_MENU(IDM_CONFIG_WIIMOTE_PLUGIN, CFrame::OnConfigWiimote)
+EVT_MENU(IDM_CONFIG_CONTROLLERS, CFrame::OnConfigControllers)
 EVT_MENU(IDM_CONFIG_HOTKEYS, CFrame::OnConfigHotkey)
 
 EVT_MENU(IDM_SAVE_PERSPECTIVE, CFrame::OnPerspectiveMenu)
@@ -283,10 +301,13 @@ EVT_MENU(IDM_UNDOLOADSTATE,     CFrame::OnUndoLoadState)
 EVT_MENU(IDM_UNDOSAVESTATE,     CFrame::OnUndoSaveState)
 EVT_MENU(IDM_LOADSTATEFILE, CFrame::OnLoadStateFromFile)
 EVT_MENU(IDM_SAVESTATEFILE, CFrame::OnSaveStateToFile)
+EVT_MENU(IDM_SAVESELECTEDSLOT, CFrame::OnSaveCurrentSlot)
+EVT_MENU(IDM_LOADSELECTEDSLOT, CFrame::OnLoadCurrentSlot)
 
 EVT_MENU_RANGE(IDM_LOADSLOT1, IDM_LOADSLOT10, CFrame::OnLoadState)
 EVT_MENU_RANGE(IDM_LOADLAST1, IDM_LOADLAST8, CFrame::OnLoadLastState)
 EVT_MENU_RANGE(IDM_SAVESLOT1, IDM_SAVESLOT10, CFrame::OnSaveState)
+EVT_MENU_RANGE(IDM_SELECTSLOT1, IDM_SELECTSLOT10, CFrame::OnSelectSlot)
 EVT_MENU_RANGE(IDM_FRAMESKIP0, IDM_FRAMESKIP9, CFrame::OnFrameSkip)
 EVT_MENU_RANGE(IDM_DRIVE1, IDM_DRIVE24, CFrame::OnBootDrive)
 EVT_MENU_RANGE(IDM_CONNECT_WIIMOTE1, IDM_CONNECT_BALANCEBOARD, CFrame::OnConnectWiimote)
@@ -297,7 +318,6 @@ EVT_ACTIVATE(CFrame::OnActive)
 EVT_CLOSE(CFrame::OnClose)
 EVT_SIZE(CFrame::OnResize)
 EVT_MOVE(CFrame::OnMove)
-EVT_LIST_ITEM_ACTIVATED(LIST_CTRL, CFrame::OnGameListCtrl_ItemActivated)
 EVT_HOST_COMMAND(wxID_ANY, CFrame::OnHostMessage)
 
 EVT_AUI_PANE_CLOSE(CFrame::OnPaneClose)
@@ -332,7 +352,7 @@ CFrame::CFrame(wxFrame* parent,
 	, m_LogWindow(nullptr), m_LogConfigWindow(nullptr)
 	, m_FifoPlayerDlg(nullptr), UseDebugger(_UseDebugger)
 	, m_bBatchMode(_BatchMode), m_bEdit(false), m_bTabSplit(false), m_bNoDocking(false)
-	, m_bGameLoading(false), m_bClosing(false), m_confirmStop(false)
+	, m_bGameLoading(false), m_bClosing(false), m_confirmStop(false), m_menubar_shadow(nullptr)
 {
 	for (int i = 0; i <= IDM_CODEWINDOW - IDM_LOGWINDOW; i++)
 		bFloatWindow[i] = false;
@@ -361,16 +381,20 @@ CFrame::CFrame(wxFrame* parent,
 		GetStatusBar()->Hide();
 
 	// Give it a menu bar
-	CreateMenu();
+	wxMenuBar* menubar_active = CreateMenu();
+	SetMenuBar(menubar_active);
+	// Create a menubar to service requests while the real menubar is hidden from the screen
+	m_menubar_shadow = CreateMenu();
 
 	// ---------------
 	// Main panel
 	// This panel is the parent for rendering and it holds the gamelistctrl
 	m_Panel = new wxPanel(this, IDM_MPANEL, wxDefaultPosition, wxDefaultSize, 0);
 
-	m_GameListCtrl = new CGameListCtrl(m_Panel, LIST_CTRL,
-			wxDefaultPosition, wxDefaultSize,
-			wxLC_REPORT | wxSUNKEN_BORDER | wxLC_ALIGN_LEFT);
+	m_GameListCtrl = new CGameListCtrl(m_Panel, wxID_ANY,
+	        wxDefaultPosition, wxDefaultSize,
+	        wxLC_REPORT | wxSUNKEN_BORDER | wxLC_ALIGN_LEFT);
+	m_GameListCtrl->Bind(wxEVT_LIST_ITEM_ACTIVATED, &CFrame::OnGameListCtrl_ItemActivated, this);
 
 	wxBoxSizer *sizerPanel = new wxBoxSizer(wxHORIZONTAL);
 	sizerPanel->Add(m_GameListCtrl, 1, wxEXPAND | wxALL);
@@ -397,12 +421,11 @@ CFrame::CFrame(wxFrame* parent,
 	m_LogWindow->Hide();
 	m_LogWindow->Disable();
 
-	g_TASInputDlg[0] = new TASInputDlg(this);
-	g_TASInputDlg[1] = new TASInputDlg(this);
-	g_TASInputDlg[2] = new TASInputDlg(this);
-	g_TASInputDlg[3] = new TASInputDlg(this);
+	for (int i = 0; i < 8; ++i)
+		g_TASInputDlg[i] = new TASInputDlg(this);
 
-	Movie::SetInputManip(TASManipFunction);
+	Movie::SetGCInputManip(GCTASManipFunction);
+	Movie::SetWiiInputManip(WiiTASManipFunction);
 
 	State::SetOnAfterLoadCallback(OnAfterLoadCallback);
 	Core::SetOnStoppedCallback(OnStoppedCallback);
@@ -445,6 +468,8 @@ CFrame::CFrame(wxFrame* parent,
 
 	// Update controls
 	UpdateGUI();
+	if (g_pCodeWindow)
+		g_pCodeWindow->UpdateButtonStates();
 }
 // Destructor
 CFrame::~CFrame()
@@ -458,6 +483,10 @@ CFrame::~CFrame()
 	ClosePages();
 
 	delete m_Mgr;
+
+	// This object is owned by us, not wxw
+	m_menubar_shadow->Destroy();
+	m_menubar_shadow = nullptr;
 }
 
 bool CFrame::RendererIsFullscreen()
@@ -636,6 +665,21 @@ WXLRESULT CFrame::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam)
 }
 #endif
 
+void CFrame::UpdateTitle(const std::string &str)
+{
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bRenderToMain &&
+	    SConfig::GetInstance().m_InterfaceStatusbar)
+	{
+		GetStatusBar()->SetStatusText(str, 0);
+		m_RenderFrame->SetTitle(scm_rev_str);
+	}
+	else
+	{
+		std::string titleStr = StringFromFormat("%s | %s", scm_rev_str, str.c_str());
+		m_RenderFrame->SetTitle(titleStr);
+	}
+}
+
 void CFrame::OnHostMessage(wxCommandEvent& event)
 {
 	switch (event.GetId())
@@ -650,8 +694,7 @@ void CFrame::OnHostMessage(wxCommandEvent& event)
 		break;
 
 	case IDM_UPDATETITLE:
-		if (m_RenderFrame != nullptr)
-			m_RenderFrame->SetTitle(event.GetString());
+		UpdateTitle(WxStrToStr(event.GetString()));
 		break;
 
 	case IDM_WINDOWSIZEREQUEST:
@@ -688,7 +731,7 @@ void CFrame::OnHostMessage(wxCommandEvent& event)
 			wxString caption = event.GetString().BeforeFirst(':');
 			wxString text = event.GetString().AfterFirst(':');
 			bPanicResult = (wxYES == wxMessageBox(text,
-						caption, event.GetInt() ? wxYES_NO : wxOK, wxGetActiveWindow()));
+						caption, event.GetInt() ? wxYES_NO : wxOK, wxWindow::FindFocus()));
 			panic_event.Set();
 		}
 		break;
@@ -702,23 +745,6 @@ void CFrame::OnHostMessage(wxCommandEvent& event)
 		OnStopped();
 		break;
 	}
-}
-
-void CFrame::GetRenderWindowSize(int& x, int& y, int& width, int& height)
-{
-#ifdef __WXGTK__
-	if (!wxIsMainThread())
-		wxMutexGuiEnter();
-#endif
-	wxRect client_rect = m_RenderParent->GetClientRect();
-	width = client_rect.width;
-	height = client_rect.height;
-	x = client_rect.x;
-	y = client_rect.y;
-#ifdef __WXGTK__
-	if (!wxIsMainThread())
-		wxMutexGuiLeave();
-#endif
 }
 
 void CFrame::OnRenderWindowSizeRequest(int width, int height)
@@ -785,11 +811,11 @@ bool CFrame::UIHasFocus()
 	// UIHasFocus should return true any time any one of our UI
 	// windows has the focus, including any dialogs or other windows.
 	//
-	// wxGetActiveWindow() returns the current wxWindow which has
+	// wxWindow::FindFocus() returns the current wxWindow which has
 	// focus. If it's not one of our windows, then it will return
 	// null.
 
-	wxWindow *focusWindow = wxGetActiveWindow();
+	wxWindow *focusWindow = wxWindow::FindFocus();
 	return (focusWindow != nullptr);
 }
 
@@ -809,17 +835,32 @@ void CFrame::OnGameListCtrl_ItemActivated(wxListEvent& WXUNUSED (event))
 		(SConfig::GetInstance().m_ListJap &&
 		SConfig::GetInstance().m_ListUsa  &&
 		SConfig::GetInstance().m_ListPal  &&
+		SConfig::GetInstance().m_ListAustralia &&
 		SConfig::GetInstance().m_ListFrance &&
+		SConfig::GetInstance().m_ListGermany &&
 		SConfig::GetInstance().m_ListItaly &&
 		SConfig::GetInstance().m_ListKorea &&
+		SConfig::GetInstance().m_ListNetherlands &&
+		SConfig::GetInstance().m_ListRussia &&
+		SConfig::GetInstance().m_ListSpain &&
 		SConfig::GetInstance().m_ListTaiwan &&
 		SConfig::GetInstance().m_ListUnknown)))
 	{
-		SConfig::GetInstance().m_ListGC      = SConfig::GetInstance().m_ListWii =
-		SConfig::GetInstance().m_ListWad     = SConfig::GetInstance().m_ListJap =
-		SConfig::GetInstance().m_ListUsa     = SConfig::GetInstance().m_ListPal =
-		SConfig::GetInstance().m_ListFrance  = SConfig::GetInstance().m_ListItaly =
-		SConfig::GetInstance().m_ListKorea   = SConfig::GetInstance().m_ListTaiwan =
+		SConfig::GetInstance().m_ListGC =
+		SConfig::GetInstance().m_ListWii =
+		SConfig::GetInstance().m_ListWad =
+		SConfig::GetInstance().m_ListJap =
+		SConfig::GetInstance().m_ListUsa =
+		SConfig::GetInstance().m_ListPal =
+		SConfig::GetInstance().m_ListAustralia =
+		SConfig::GetInstance().m_ListFrance =
+		SConfig::GetInstance().m_ListGermany =
+		SConfig::GetInstance().m_ListItaly =
+		SConfig::GetInstance().m_ListKorea =
+		SConfig::GetInstance().m_ListNetherlands =
+		SConfig::GetInstance().m_ListRussia =
+		SConfig::GetInstance().m_ListSpain =
+		SConfig::GetInstance().m_ListTaiwan =
 		SConfig::GetInstance().m_ListUnknown = true;
 
 		GetMenuBar()->FindItem(IDM_LISTGC)->Check(true);
@@ -828,9 +869,14 @@ void CFrame::OnGameListCtrl_ItemActivated(wxListEvent& WXUNUSED (event))
 		GetMenuBar()->FindItem(IDM_LISTJAP)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTUSA)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTPAL)->Check(true);
+		GetMenuBar()->FindItem(IDM_LISTAUSTRALIA)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTFRANCE)->Check(true);
+		GetMenuBar()->FindItem(IDM_LISTGERMANY)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTITALY)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTKOREA)->Check(true);
+		GetMenuBar()->FindItem(IDM_LISTNETHERLANDS)->Check(true);
+		GetMenuBar()->FindItem(IDM_LISTRUSSIA)->Check(true);
+		GetMenuBar()->FindItem(IDM_LISTSPAIN)->Check(true);
 		GetMenuBar()->FindItem(IDM_LISTTAIWAN)->Check(true);
 		GetMenuBar()->FindItem(IDM_LIST_UNK)->Check(true);
 
@@ -915,6 +961,30 @@ int GetCmdForHotkey(unsigned int key)
 	case HK_UNDO_SAVE_STATE: return IDM_UNDOSAVESTATE;
 	case HK_LOAD_STATE_FILE: return IDM_LOADSTATEFILE;
 	case HK_SAVE_STATE_FILE: return IDM_SAVESTATEFILE;
+
+	case HK_SELECT_STATE_SLOT_1: return IDM_SELECTSLOT1;
+	case HK_SELECT_STATE_SLOT_2: return IDM_SELECTSLOT2;
+	case HK_SELECT_STATE_SLOT_3: return IDM_SELECTSLOT3;
+	case HK_SELECT_STATE_SLOT_4: return IDM_SELECTSLOT4;
+	case HK_SELECT_STATE_SLOT_5: return IDM_SELECTSLOT5;
+	case HK_SELECT_STATE_SLOT_6: return IDM_SELECTSLOT6;
+	case HK_SELECT_STATE_SLOT_7: return IDM_SELECTSLOT7;
+	case HK_SELECT_STATE_SLOT_8: return IDM_SELECTSLOT8;
+	case HK_SELECT_STATE_SLOT_9: return IDM_SELECTSLOT9;
+	case HK_SELECT_STATE_SLOT_10: return IDM_SELECTSLOT10;
+	case HK_SAVE_STATE_SLOT_SELECTED: return IDM_SAVESELECTEDSLOT;
+	case HK_LOAD_STATE_SLOT_SELECTED: return IDM_LOADSELECTEDSLOT;
+
+	case HK_FREELOOK_INCREASE_SPEED: return IDM_FREELOOK_INCREASE_SPEED;
+	case HK_FREELOOK_DECREASE_SPEED: return IDM_FREELOOK_DECREASE_SPEED;
+	case HK_FREELOOK_RESET_SPEED: return IDM_FREELOOK_RESET_SPEED;
+	case HK_FREELOOK_LEFT: return IDM_FREELOOK_LEFT;
+	case HK_FREELOOK_RIGHT: return IDM_FREELOOK_RIGHT;
+	case HK_FREELOOK_UP: return IDM_FREELOOK_UP;
+	case HK_FREELOOK_DOWN: return IDM_FREELOOK_DOWN;
+	case HK_FREELOOK_ZOOM_IN: return IDM_FREELOOK_ZOOM_IN;
+	case HK_FREELOOK_ZOOM_OUT: return IDM_FREELOOK_ZOOM_OUT;
+	case HK_FREELOOK_RESET: return IDM_FREELOOK_RESET;
 	}
 
 	return -1;
@@ -940,15 +1010,23 @@ void OnStoppedCallback()
 	}
 }
 
-void TASManipFunction(GCPadStatus* PadStatus, int controllerID)
+void GCTASManipFunction(GCPadStatus* PadStatus, int controllerID)
 {
 	if (main_frame)
-		main_frame->g_TASInputDlg[controllerID]->GetValues(PadStatus, controllerID);
+		main_frame->g_TASInputDlg[controllerID]->GetValues(PadStatus);
+}
+
+void WiiTASManipFunction(u8* data, WiimoteEmu::ReportFeatures rptf, int controllerID, int ext, const wiimote_key key)
+{
+	if (main_frame)
+	{
+		main_frame->g_TASInputDlg[controllerID + 4]->GetValues(data, rptf, ext, key);
+	}
 }
 
 bool TASInputHasFocus()
 {
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < 8; ++i)
 	{
 		if (main_frame->g_TASInputDlg[i]->TASHasFocus())
 			return true;
@@ -1007,11 +1085,10 @@ void CFrame::OnKeyDown(wxKeyEvent& event)
 		else if (IsHotkey(event, HK_TOGGLE_EFBCOPIES))
 		{
 			OSDChoice = 3;
-			// Toggle EFB copy
-			if (!g_Config.bEFBCopyEnable || g_Config.bCopyEFBToTexture)
+			// Toggle EFB copies between EFB2RAM and EFB2Texture
+			if (!g_Config.bEFBCopyEnable)
 			{
-				g_Config.bEFBCopyEnable ^= true;
-				g_Config.bCopyEFBToTexture = false;
+				OSD::AddMessage("EFB Copies are disabled, enable them in Graphics settings for toggling", 6000);
 			}
 			else
 			{
@@ -1037,8 +1114,47 @@ void CFrame::OnKeyDown(wxKeyEvent& event)
 			if (--SConfig::GetInstance().m_Framelimit > 0x19)
 				SConfig::GetInstance().m_Framelimit = 0x19;
 		}
+		else if (IsHotkey(event, HK_SAVE_STATE_SLOT_SELECTED))
+		{
+			State::Save(g_saveSlot);
+		}
+		else if (IsHotkey(event, HK_LOAD_STATE_SLOT_SELECTED))
+		{
+			State::Load(g_saveSlot);
+		}
+		else if (IsHotkey(event, HK_INCREASE_SEPARATION))
+		{
+			if (++g_Config.iStereoSeparation > 100)
+				g_Config.iStereoSeparation = 100;
+		}
+		else if (IsHotkey(event, HK_DECREASE_SEPARATION))
+		{
+			if (--g_Config.iStereoSeparation < 0)
+				g_Config.iStereoSeparation = 0;
+		}
+		else if (IsHotkey(event, HK_INCREASE_CONVERGENCE))
+		{
+			if (++g_Config.iStereoConvergence > 500)
+				g_Config.iStereoConvergence = 500;
+		}
+		else if (IsHotkey(event, HK_DECREASE_CONVERGENCE))
+		{
+			if (--g_Config.iStereoConvergence < 0)
+				g_Config.iStereoConvergence = 0;
+		}
+
 		else
 		{
+			for (int i = HK_SELECT_STATE_SLOT_1; i < HK_SELECT_STATE_SLOT_10; ++i)
+			{
+				if (IsHotkey (event, i))
+				{
+					wxCommandEvent slot_event;
+					slot_event.SetId(i + IDM_SELECTSLOT1 - HK_SELECT_STATE_SLOT_1);
+					CFrame::OnSelectSlot(slot_event);
+				}
+			}
+
 			unsigned int i = NUM_HOTKEYS;
 			if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bRenderToMain || TASInputHasFocus())
 			{
@@ -1078,45 +1194,35 @@ void CFrame::OnKeyDown(wxKeyEvent& event)
 		// Actually perform the wiimote connection or disconnection
 		if (WiimoteId >= 0)
 		{
-			bool connect = !GetMenuBar()->IsChecked(IDM_CONNECT_WIIMOTE1 + WiimoteId);
-			ConnectWiimote(WiimoteId, connect);
+			wxCommandEvent evt;
+			evt.SetId(IDM_CONNECT_WIIMOTE1 + WiimoteId);
+			OnConnectWiimote(evt);
 		}
 
-		if (g_Config.bFreeLook && event.GetModifiers() == wxMOD_SHIFT)
+		if (g_Config.bFreeLook)
 		{
 			static float debugSpeed = 1.0f;
-			switch (event.GetKeyCode())
-			{
-			case '9':
-				debugSpeed /= 2.0f;
-				break;
-			case '0':
+
+			if (IsHotkey(event, HK_FREELOOK_INCREASE_SPEED))
 				debugSpeed *= 2.0f;
-				break;
-			case 'W':
-				VertexShaderManager::TranslateView(0.0f, debugSpeed);
-				break;
-			case 'S':
-				VertexShaderManager::TranslateView(0.0f, -debugSpeed);
-				break;
-			case 'A':
-				VertexShaderManager::TranslateView(debugSpeed, 0.0f);
-				break;
-			case 'D':
-				VertexShaderManager::TranslateView(-debugSpeed, 0.0f);
-				break;
-			case 'Q':
-				VertexShaderManager::TranslateView(0.0f, 0.0f, debugSpeed);
-				break;
-			case 'E':
+			else if (IsHotkey(event, HK_FREELOOK_DECREASE_SPEED))
+				debugSpeed /= 2.0f;
+			else if (IsHotkey(event, HK_FREELOOK_RESET_SPEED))
+				debugSpeed = 1.0f;
+			else if (IsHotkey(event, HK_FREELOOK_UP))
 				VertexShaderManager::TranslateView(0.0f, 0.0f, -debugSpeed);
-				break;
-			case 'R':
+			else if (IsHotkey(event, HK_FREELOOK_DOWN))
+				VertexShaderManager::TranslateView(0.0f, 0.0f, debugSpeed);
+			else if (IsHotkey(event, HK_FREELOOK_LEFT))
+				VertexShaderManager::TranslateView(debugSpeed, 0.0f);
+			else if (IsHotkey(event, HK_FREELOOK_RIGHT))
+				VertexShaderManager::TranslateView(-debugSpeed, 0.0f);
+			else if (IsHotkey(event, HK_FREELOOK_ZOOM_IN))
+				VertexShaderManager::TranslateView(0.0f, debugSpeed);
+			else if (IsHotkey(event, HK_FREELOOK_ZOOM_OUT))
+				VertexShaderManager::TranslateView(0.0f, -debugSpeed);
+			else if (IsHotkey(event, HK_FREELOOK_RESET))
 				VertexShaderManager::ResetView();
-				break;
-			default:
-				break;
-			}
 		}
 	}
 	else
@@ -1199,7 +1305,7 @@ void CFrame::OnMouse(wxMouseEvent& event)
 
 void CFrame::DoFullscreen(bool enable_fullscreen)
 {
-	if (!g_Config.BorderlessFullscreenEnabled() &&
+	if (g_Config.ExclusiveFullscreenEnabled() &&
 		!SConfig::GetInstance().m_LocalCoreStartupParameter.bRenderToMain &&
 		Core::GetState() == Core::CORE_PAUSE)
 	{
@@ -1226,7 +1332,7 @@ void CFrame::DoFullscreen(bool enable_fullscreen)
 	{
 		m_RenderFrame->ShowFullScreen(true, wxFULLSCREEN_ALL);
 	}
-	else if (g_Config.BorderlessFullscreenEnabled() ||
+	else if (!g_Config.ExclusiveFullscreenEnabled() ||
 		SConfig::GetInstance().m_LocalCoreStartupParameter.bRenderToMain)
 	{
 		// Exiting exclusive fullscreen should be done from a Renderer callback.
@@ -1246,8 +1352,15 @@ void CFrame::DoFullscreen(bool enable_fullscreen)
 			// Hide toolbar
 			DoToggleToolbar(false);
 
-			// Disable toggling toolbar in menu
-			GetMenuBar()->FindItem(IDM_TOGGLE_TOOLBAR)->Enable(false);
+			// Hide menubar (by having wxwidgets delete it)
+			SetMenuBar(nullptr);
+
+			// Hide the statusbar if enabled
+			if (GetStatusBar()->IsShown())
+			{
+				GetStatusBar()->Hide();
+				this->SendSizeEvent();
+			}
 		}
 		else
 		{
@@ -1257,8 +1370,18 @@ void CFrame::DoFullscreen(bool enable_fullscreen)
 			// Restore toolbar to the status it was at before going fullscreen.
 			DoToggleToolbar(SConfig::GetInstance().m_InterfaceToolbar);
 
-			// Re-enable toggling toolbar in menu
-			GetMenuBar()->FindItem(IDM_TOGGLE_TOOLBAR)->Enable(true);
+			// Recreate the menubar if needed.
+			if (wxFrame::GetMenuBar() == nullptr)
+			{
+				SetMenuBar(CreateMenu());
+			}
+
+			// Show statusbar if enabled
+			if (SConfig::GetInstance().m_InterfaceStatusbar)
+			{
+				GetStatusBar()->Show();
+				this->SendSizeEvent();
+			}
 		}
 	}
 	else
@@ -1266,7 +1389,7 @@ void CFrame::DoFullscreen(bool enable_fullscreen)
 		m_RenderFrame->Raise();
 	}
 
-	g_Config.bFullscreen = (g_Config.BorderlessFullscreenEnabled() ||
+	g_Config.bFullscreen = (!g_Config.ExclusiveFullscreenEnabled() ||
 		SConfig::GetInstance().m_LocalCoreStartupParameter.bRenderToMain) ? false : enable_fullscreen;
 }
 

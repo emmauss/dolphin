@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/ArmEmitter.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -14,6 +14,8 @@
 #include "Core/PowerPC/JitArm32/JitAsm.h"
 #include "Core/PowerPC/JitArm32/JitRegCache.h"
 
+using namespace ArmGen;
+
 void JitArm::psq_l(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
@@ -22,7 +24,7 @@ void JitArm::psq_l(UGeckoInstruction inst)
 	// R12 contains scale
 	// R11 contains type
 	// R10 is the ADDR
-	FALLBACK_IF(js.memcheck || !Core::g_CoreStartupParameter.bFastmem);
+	FALLBACK_IF(js.memcheck || !SConfig::GetInstance().m_LocalCoreStartupParameter.bFastmem);
 
 	bool update = inst.OPCD == 57;
 	s32 offset = inst.SIMM_12;
@@ -33,9 +35,21 @@ void JitArm::psq_l(UGeckoInstruction inst)
 	UBFX(R11, R11, 24, 6); // Scale
 	LSL(R11, R11, 2);
 
-	MOVI2R(R10, (u32)offset);
-	if (inst.RA || update) // Always uses the register on update
-		ADD(R10, R10, gpr.R(inst.RA));
+	Operand2 off;
+	if (TryMakeOperand2(offset, off))
+	{
+		if (inst.RA || update)
+			ADD(R10, gpr.R(inst.RA), off);
+		else
+			MOV(R10, off);
+	}
+	else
+	{
+		MOVI2R(R10, (u32)offset);
+		if (inst.RA || update) // Always uses the register on update
+			ADD(R10, R10, gpr.R(inst.RA));
+	}
+
 	if (update)
 		MOV(gpr.R(inst.RA), R10);
 	MOVI2R(R14, (u32)asm_routines.pairedLoadQuantized);
@@ -62,7 +76,7 @@ void JitArm::psq_lx(UGeckoInstruction inst)
 	// R12 contains scale
 	// R11 contains type
 	// R10 is the ADDR
-	FALLBACK_IF(js.memcheck || !Core::g_CoreStartupParameter.bFastmem);
+	FALLBACK_IF(js.memcheck || !SConfig::GetInstance().m_LocalCoreStartupParameter.bFastmem);
 
 	bool update = inst.SUBOP10 == 38;
 
@@ -77,7 +91,9 @@ void JitArm::psq_lx(UGeckoInstruction inst)
 		ADD(R10, gpr.R(inst.RB), gpr.R(inst.RA));
 	}
 	else
+	{
 		MOV(R10, gpr.R(inst.RB));
+	}
 
 	if (update)
 		MOV(gpr.R(inst.RA), R10);
@@ -111,7 +127,7 @@ void JitArm::psq_st(UGeckoInstruction inst)
 	// R12 contains scale
 	// R11 contains type
 	// R10 is the ADDR
-	FALLBACK_IF(js.memcheck || !Core::g_CoreStartupParameter.bFastmem);
+	FALLBACK_IF(js.memcheck || !SConfig::GetInstance().m_LocalCoreStartupParameter.bFastmem);
 
 	bool update = inst.OPCD == 61;
 	s32 offset = inst.SIMM_12;
@@ -122,13 +138,20 @@ void JitArm::psq_st(UGeckoInstruction inst)
 	UBFX(R11, R11, 8, 6); // Scale
 	LSL(R11, R11, 2);
 
-	if (inst.RA || update) // Always uses the register on update
+	Operand2 off;
+	if (TryMakeOperand2(offset, off))
 	{
-		MOVI2R(R14, offset);
-		ADD(R10, gpr.R(inst.RA), R14);
+		if (inst.RA || update)
+			ADD(R10, gpr.R(inst.RA), off);
+		else
+			MOV(R10, off);
 	}
 	else
+	{
 		MOVI2R(R10, (u32)offset);
+		if (inst.RA || update) // Always uses the register on update
+			ADD(R10, R10, gpr.R(inst.RA));
+	}
 
 	if (update)
 		MOV(gpr.R(inst.RA), R10);
@@ -156,7 +179,7 @@ void JitArm::psq_stx(UGeckoInstruction inst)
 	// R12 contains scale
 	// R11 contains type
 	// R10 is the ADDR
-	FALLBACK_IF(js.memcheck || !Core::g_CoreStartupParameter.bFastmem);
+	FALLBACK_IF(js.memcheck || !SConfig::GetInstance().m_LocalCoreStartupParameter.bFastmem);
 
 	bool update = inst.SUBOP10 == 39;
 
@@ -171,7 +194,9 @@ void JitArm::psq_stx(UGeckoInstruction inst)
 		ADD(R10, gpr.R(inst.RA), gpr.R(inst.RB));
 	}
 	else
+	{
 		MOV(R10, gpr.R(inst.RB));
+	}
 
 	if (update)
 		MOV(gpr.R(inst.RA), R10);

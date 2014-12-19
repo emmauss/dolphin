@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Common/CommonTypes.h"
+
 // all constant buffer attributes must be 16 bytes aligned, so this are the only allowed components:
 typedef float float4[4];
 typedef u32 uint4[4];
@@ -40,6 +42,12 @@ struct VertexShaderConstants
 	float4 transformmatrices[64];
 	float4 normalmatrices[32];
 	float4 posttransformmatrices[64];
-	float4 depthparams;
+	float4 pixelcentercorrection;
 };
 
+struct GeometryShaderConstants
+{
+	float4 stereoparams;
+	float4 lineptparams;
+	int4 texoffset;
+};

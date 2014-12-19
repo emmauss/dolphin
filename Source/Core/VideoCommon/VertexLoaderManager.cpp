@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "Common/CommonFuncs.h"
 #include "Core/HW/Memmap.h"
 
 #include "VideoCommon/BPMemory.h"
@@ -19,12 +21,7 @@
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoCommon.h"
 
-static int s_attr_dirty;  // bitfield
-
 static NativeVertexFormat* s_current_vtx_fmt;
-
-typedef std::pair<VertexLoader*, NativeVertexFormat*> VertexLoaderCacheItem;
-static VertexLoaderCacheItem s_VertexLoaders[8];
 
 namespace std
 {
@@ -40,35 +37,30 @@ struct hash<VertexLoaderUID>
 
 }
 
-typedef std::unordered_map<VertexLoaderUID, VertexLoaderCacheItem> VertexLoaderMap;
-typedef std::map<PortableVertexDeclaration, std::unique_ptr<NativeVertexFormat>> NativeVertexLoaderMap;
+typedef std::unordered_map<VertexLoaderUID, std::unique_ptr<VertexLoader>> VertexLoaderMap;
 
 namespace VertexLoaderManager
 {
 
-static VertexLoaderMap s_VertexLoaderMap;
-static NativeVertexLoaderMap s_native_vertex_map;
+static std::mutex s_vertex_loader_map_lock;
+static VertexLoaderMap s_vertex_loader_map;
 // TODO - change into array of pointers. Keep a map of all seen so far.
 
 void Init()
 {
 	MarkAllDirty();
-	for (auto& map_entry : s_VertexLoaders)
-	{
-		map_entry.first = nullptr;
-		map_entry.second = nullptr;
-	}
+	for (auto& map_entry : g_main_cp_state.vertex_loaders)
+		map_entry = nullptr;
+	for (auto& map_entry : g_preprocess_cp_state.vertex_loaders)
+		map_entry = nullptr;
 	RecomputeCachedArraybases();
 }
 
 void Shutdown()
 {
-	for (auto& map_entry : s_VertexLoaderMap)
-	{
-		delete map_entry.second.first;
-	}
-	s_VertexLoaderMap.clear();
-	s_native_vertex_map.clear();
+	std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
+	s_vertex_loader_map.clear();
+	VertexLoader::ClearNativeVertexFormatCache();
 }
 
 namespace
@@ -86,14 +78,15 @@ struct entry
 
 void AppendListToString(std::string *dest)
 {
+	std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
 	std::vector<entry> entries;
 
 	size_t total_size = 0;
-	for (const auto& map_entry : s_VertexLoaderMap)
+	for (const auto& map_entry : s_vertex_loader_map)
 	{
 		entry e;
-		map_entry.second.first->AppendToString(&e.text);
-		e.num_verts = map_entry.second.first->GetNumLoadedVerts();
+		map_entry.second->AppendToString(&e.text);
+		e.num_verts = map_entry.second->GetNumLoadedVerts();
 		entries.push_back(e);
 		total_size += e.text.size() + 1;
 	}
@@ -107,82 +100,79 @@ void AppendListToString(std::string *dest)
 
 void MarkAllDirty()
 {
-	s_attr_dirty = 0xff;
+	g_main_cp_state.attr_dirty = BitSet32::AllTrue(8);
+	g_preprocess_cp_state.attr_dirty = BitSet32::AllTrue(8);
 }
 
-static NativeVertexFormat* GetNativeVertexFormat(const PortableVertexDeclaration& format,
-                                                 u32 components)
+static VertexLoader* RefreshLoader(int vtx_attr_group, CPState* state)
 {
-	auto& native = s_native_vertex_map[format];
-	if (!native)
+	VertexLoader* loader;
+	if (state->attr_dirty[vtx_attr_group])
 	{
-		auto raw_pointer = g_vertex_manager->CreateNativeVertexFormat();
-		native = std::unique_ptr<NativeVertexFormat>(raw_pointer);
-		native->Initialize(format);
-		native->m_components = components;
-	}
-	return native.get();
-}
-
-static VertexLoaderCacheItem RefreshLoader(int vtx_attr_group)
-{
-	if ((s_attr_dirty >> vtx_attr_group) & 1)
-	{
-		VertexLoaderUID uid(g_VtxDesc, g_VtxAttr[vtx_attr_group]);
-		VertexLoaderMap::iterator iter = s_VertexLoaderMap.find(uid);
-		if (iter != s_VertexLoaderMap.end())
+		VertexLoaderUID uid(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
+		std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
+		VertexLoaderMap::iterator iter = s_vertex_loader_map.find(uid);
+		if (iter != s_vertex_loader_map.end())
 		{
-			s_VertexLoaders[vtx_attr_group] = iter->second;
+			loader = iter->second.get();
 		}
 		else
 		{
-			VertexLoader* loader = new VertexLoader(g_VtxDesc, g_VtxAttr[vtx_attr_group]);
-
-			NativeVertexFormat* vtx_fmt = GetNativeVertexFormat(
-				loader->GetNativeVertexDeclaration(),
-				loader->GetNativeComponents());
-
-			s_VertexLoaderMap[uid] = std::make_pair(loader, vtx_fmt);
-			s_VertexLoaders[vtx_attr_group] = std::make_pair(loader, vtx_fmt);
+			loader = new VertexLoader(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
+			s_vertex_loader_map[uid] = std::unique_ptr<VertexLoader>(loader);
 			INCSTAT(stats.numVertexLoaders);
 		}
+		state->vertex_loaders[vtx_attr_group] = loader;
+		state->attr_dirty[vtx_attr_group] = false;
+	} else {
+		loader = state->vertex_loaders[vtx_attr_group];
 	}
-	s_attr_dirty &= ~(1 << vtx_attr_group);
-	return s_VertexLoaders[vtx_attr_group];
+	return loader;
 }
 
-void RunVertices(int vtx_attr_group, int primitive, int count)
+int RunVertices(int vtx_attr_group, int primitive, int count, DataReader src, bool skip_drawing)
 {
 	if (!count)
-		return;
-	auto loader = RefreshLoader(vtx_attr_group);
+		return 0;
 
-	if (bpmem.genMode.cullmode == GenMode::CULL_ALL && primitive < 5)
+	CPState* state = &g_main_cp_state;
+
+	VertexLoader* loader = RefreshLoader(vtx_attr_group, state);
+
+	int size = count * loader->GetVertexSize();
+	if ((int)src.size() < size)
+		return -1;
+
+	if (skip_drawing || (bpmem.genMode.cullmode == GenMode::CULL_ALL && primitive < 5))
 	{
 		// if cull mode is CULL_ALL, ignore triangles and quads
-		DataSkip(count * loader.first->GetVertexSize());
-		return;
+		return size;
 	}
 
+	NativeVertexFormat* native = loader->GetNativeVertexFormat();
+
 	// If the native vertex format changed, force a flush.
-	if (loader.second != s_current_vtx_fmt)
+	if (native != s_current_vtx_fmt)
 		VertexManager::Flush();
-	s_current_vtx_fmt = loader.second;
+	s_current_vtx_fmt = native;
 
-	VertexManager::PrepareForAdditionalData(primitive, count,
-			loader.first->GetNativeVertexDeclaration().stride);
+	DataReader dst = VertexManager::PrepareForAdditionalData(primitive, count,
+			loader->GetNativeVertexDeclaration().stride);
 
-	loader.first->RunVertices(g_VtxAttr[vtx_attr_group], primitive, count);
+	count = loader->RunVertices(state->vtx_attr[vtx_attr_group], primitive, count, src, dst);
 
 	IndexGenerator::AddIndices(primitive, count);
 
+	VertexManager::FlushData(count, loader->GetNativeVertexDeclaration().stride);
+
 	ADDSTAT(stats.thisFrame.numPrims, count);
 	INCSTAT(stats.thisFrame.numPrimitiveJoins);
+	return size;
 }
 
-int GetVertexSize(int vtx_attr_group)
+int GetVertexSize(int vtx_attr_group, bool preprocess)
 {
-	return RefreshLoader(vtx_attr_group).first->GetVertexSize();
+	return RefreshLoader(vtx_attr_group, preprocess ? &g_preprocess_cp_state : &g_main_cp_state)->GetVertexSize();
 }
 
 NativeVertexFormat* GetCurrentVertexFormat()
@@ -192,78 +182,83 @@ NativeVertexFormat* GetCurrentVertexFormat()
 
 }  // namespace
 
-void LoadCPReg(u32 sub_cmd, u32 value)
+void LoadCPReg(u32 sub_cmd, u32 value, bool is_preprocess)
 {
+	bool update_global_state = !is_preprocess;
+	CPState* state = is_preprocess ? &g_preprocess_cp_state : &g_main_cp_state;
 	switch (sub_cmd & 0xF0)
 	{
 	case 0x30:
-		VertexShaderManager::SetTexMatrixChangedA(value);
+		if (update_global_state)
+			VertexShaderManager::SetTexMatrixChangedA(value);
 		break;
 
 	case 0x40:
-		VertexShaderManager::SetTexMatrixChangedB(value);
+		if (update_global_state)
+			VertexShaderManager::SetTexMatrixChangedB(value);
 		break;
 
 	case 0x50:
-		g_VtxDesc.Hex &= ~0x1FFFF;  // keep the Upper bits
-		g_VtxDesc.Hex |= value;
-		s_attr_dirty = 0xFF;
+		state->vtx_desc.Hex &= ~0x1FFFF;  // keep the Upper bits
+		state->vtx_desc.Hex |= value;
+		state->attr_dirty = BitSet32::AllTrue(8);
 		break;
 
 	case 0x60:
-		g_VtxDesc.Hex &= 0x1FFFF;  // keep the lower 17Bits
-		g_VtxDesc.Hex |= (u64)value << 17;
-		s_attr_dirty = 0xFF;
+		state->vtx_desc.Hex &= 0x1FFFF;  // keep the lower 17Bits
+		state->vtx_desc.Hex |= (u64)value << 17;
+		state->attr_dirty = BitSet32::AllTrue(8);
 		break;
 
 	case 0x70:
 		_assert_((sub_cmd & 0x0F) < 8);
-		g_VtxAttr[sub_cmd & 7].g0.Hex = value;
-		s_attr_dirty |= 1 << (sub_cmd & 7);
+		state->vtx_attr[sub_cmd & 7].g0.Hex = value;
+		state->attr_dirty[sub_cmd & 7] = true;
 		break;
 
 	case 0x80:
 		_assert_((sub_cmd & 0x0F) < 8);
-		g_VtxAttr[sub_cmd & 7].g1.Hex = value;
-		s_attr_dirty |= 1 << (sub_cmd & 7);
+		state->vtx_attr[sub_cmd & 7].g1.Hex = value;
+		state->attr_dirty[sub_cmd & 7] = true;
 		break;
 
 	case 0x90:
 		_assert_((sub_cmd & 0x0F) < 8);
-		g_VtxAttr[sub_cmd & 7].g2.Hex = value;
-		s_attr_dirty |= 1 << (sub_cmd & 7);
+		state->vtx_attr[sub_cmd & 7].g2.Hex = value;
+		state->attr_dirty[sub_cmd & 7] = true;
 		break;
 
 	// Pointers to vertex arrays in GC RAM
 	case 0xA0:
-		arraybases[sub_cmd & 0xF] = value;
-		cached_arraybases[sub_cmd & 0xF] = Memory::GetPointer(value);
+		state->array_bases[sub_cmd & 0xF] = value;
+		if (update_global_state)
+			cached_arraybases[sub_cmd & 0xF] = Memory::GetPointer(value);
 		break;
 
 	case 0xB0:
-		arraystrides[sub_cmd & 0xF] = value & 0xFF;
+		state->array_strides[sub_cmd & 0xF] = value & 0xFF;
 		break;
 	}
 }
 
 void FillCPMemoryArray(u32 *memory)
 {
-	memory[0x30] = MatrixIndexA.Hex;
-	memory[0x40] = MatrixIndexB.Hex;
-	memory[0x50] = (u32)g_VtxDesc.Hex;
-	memory[0x60] = (u32)(g_VtxDesc.Hex >> 17);
+	memory[0x30] = g_main_cp_state.matrix_index_a.Hex;
+	memory[0x40] = g_main_cp_state.matrix_index_b.Hex;
+	memory[0x50] = (u32)g_main_cp_state.vtx_desc.Hex;
+	memory[0x60] = (u32)(g_main_cp_state.vtx_desc.Hex >> 17);
 
 	for (int i = 0; i < 8; ++i)
 	{
-		memory[0x70 + i] = g_VtxAttr[i].g0.Hex;
-		memory[0x80 + i] = g_VtxAttr[i].g1.Hex;
-		memory[0x90 + i] = g_VtxAttr[i].g2.Hex;
+		memory[0x70 + i] = g_main_cp_state.vtx_attr[i].g0.Hex;
+		memory[0x80 + i] = g_main_cp_state.vtx_attr[i].g1.Hex;
+		memory[0x90 + i] = g_main_cp_state.vtx_attr[i].g2.Hex;
 	}
 
 	for (int i = 0; i < 16; ++i)
 	{
-		memory[0xA0 + i] = arraybases[i];
-		memory[0xB0 + i] = arraystrides[i];
+		memory[0xA0 + i] = g_main_cp_state.array_bases[i];
+		memory[0xB0 + i] = g_main_cp_state.array_strides[i];
 	}
 }
 
@@ -271,6 +266,6 @@ void RecomputeCachedArraybases()
 {
 	for (int i = 0; i < 16; i++)
 	{
-		cached_arraybases[i] = Memory::GetPointer(arraybases[i]);
+		cached_arraybases[i] = Memory::GetPointer(g_main_cp_state.array_bases[i]);
 	}
 }

@@ -12,8 +12,8 @@
 #include <vector>
 #include <sys/stat.h>
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 
 #ifdef _WIN32
@@ -95,7 +95,8 @@ bool IsDirectory(const std::string &filename)
 	int result = stat64(copy.c_str(), &file_info);
 #endif
 
-	if (result < 0) {
+	if (result < 0)
+	{
 		WARN_LOG(COMMON, "IsDirectory: stat failed on %s: %s",
 				 filename.c_str(), GetLastErrorMsg());
 		return false;
@@ -133,7 +134,8 @@ bool Delete(const std::string &filename)
 		return false;
 	}
 #else
-	if (unlink(filename.c_str()) == -1) {
+	if (unlink(filename.c_str()) == -1)
+	{
 		WARN_LOG(COMMON, "Delete: unlink failed on %s: %s",
 				 filename.c_str(), GetLastErrorMsg());
 		return false;
@@ -413,7 +415,8 @@ u64 GetSize(const std::string &filename)
 u64 GetSize(const int fd)
 {
 	struct stat64 buf;
-	if (fstat64(fd, &buf) != 0) {
+	if (fstat64(fd, &buf) != 0)
+	{
 		ERROR_LOG(COMMON, "GetSize: stat failed %i: %s",
 			fd, GetLastErrorMsg());
 		return 0;
@@ -426,17 +429,21 @@ u64 GetSize(FILE *f)
 {
 	// can't use off_t here because it can be 32-bit
 	u64 pos = ftello(f);
-	if (fseeko(f, 0, SEEK_END) != 0) {
+	if (fseeko(f, 0, SEEK_END) != 0)
+	{
 		ERROR_LOG(COMMON, "GetSize: seek failed %p: %s",
 			  f, GetLastErrorMsg());
 		return 0;
 	}
+
 	u64 size = ftello(f);
-	if ((size != pos) && (fseeko(f, pos, SEEK_SET) != 0)) {
+	if ((size != pos) && (fseeko(f, pos, SEEK_SET) != 0))
+	{
 		ERROR_LOG(COMMON, "GetSize: seek failed %p: %s",
 			  f, GetLastErrorMsg());
 		return 0;
 	}
+
 	return size;
 }
 
@@ -658,8 +665,8 @@ std::string GetCurrentDir()
 {
 	char *dir;
 	// Get the current working directory (getcwd uses malloc)
-	if (!(dir = __getcwd(nullptr, 0))) {
-
+	if (!(dir = __getcwd(nullptr, 0)))
+	{
 		ERROR_LOG(COMMON, "GetCurrentDirectory failed: %s",
 				GetLastErrorMsg());
 		return nullptr;
@@ -818,7 +825,8 @@ const std::string& GetUserPath(const unsigned int DirIDX, const std::string &new
 		paths[D_SHADERS_IDX]        = paths[D_USER_IDX] + SHADERS_DIR DIR_SEP;
 		paths[D_STATESAVES_IDX]     = paths[D_USER_IDX] + STATESAVES_DIR DIR_SEP;
 		paths[D_SCREENSHOTS_IDX]    = paths[D_USER_IDX] + SCREENSHOTS_DIR DIR_SEP;
-		paths[D_HIRESTEXTURES_IDX]  = paths[D_USER_IDX] + HIRES_TEXTURES_DIR DIR_SEP;
+		paths[D_LOAD_IDX]           = paths[D_USER_IDX] + LOAD_DIR DIR_SEP;
+		paths[D_HIRESTEXTURES_IDX]  = paths[D_LOAD_IDX] + HIRES_TEXTURES_DIR DIR_SEP;
 		paths[D_DUMP_IDX]           = paths[D_USER_IDX] + DUMP_DIR DIR_SEP;
 		paths[D_DUMPFRAMES_IDX]     = paths[D_DUMP_IDX] + DUMP_FRAMES_DIR DIR_SEP;
 		paths[D_DUMPAUDIO_IDX]      = paths[D_DUMP_IDX] + DUMP_AUDIO_DIR DIR_SEP;
@@ -872,7 +880,7 @@ const std::string& GetUserPath(const unsigned int DirIDX, const std::string &new
 			paths[D_SHADERS_IDX]        = paths[D_USER_IDX] + SHADERS_DIR DIR_SEP;
 			paths[D_STATESAVES_IDX]     = paths[D_USER_IDX] + STATESAVES_DIR DIR_SEP;
 			paths[D_SCREENSHOTS_IDX]    = paths[D_USER_IDX] + SCREENSHOTS_DIR DIR_SEP;
-			paths[D_HIRESTEXTURES_IDX]  = paths[D_USER_IDX] + HIRES_TEXTURES_DIR DIR_SEP;
+			paths[D_HIRESTEXTURES_IDX]  = paths[D_LOAD_IDX] + HIRES_TEXTURES_DIR DIR_SEP;
 			paths[D_DUMP_IDX]           = paths[D_USER_IDX] + DUMP_DIR DIR_SEP;
 			paths[D_DUMPFRAMES_IDX]     = paths[D_DUMP_IDX] + DUMP_FRAMES_DIR DIR_SEP;
 			paths[D_DUMPAUDIO_IDX]      = paths[D_DUMP_IDX] + DUMP_AUDIO_DIR DIR_SEP;
@@ -915,6 +923,10 @@ const std::string& GetUserPath(const unsigned int DirIDX, const std::string &new
 		case D_LOGS_IDX:
 			paths[D_MAILLOGS_IDX]       = paths[D_LOGS_IDX] + MAIL_LOGS_DIR DIR_SEP;
 			paths[F_MAINLOG_IDX]        = paths[D_LOGS_IDX] + MAIN_LOG;
+			break;
+
+		case D_LOAD_IDX:
+			paths[D_HIRESTEXTURES_IDX]  = paths[D_LOAD_IDX] + HIRES_TEXTURES_DIR DIR_SEP;
 		}
 
 		paths[D_WIIUSER_IDX]    = paths[D_WIIROOT_IDX] + DIR_SEP;

@@ -141,13 +141,13 @@
     <ClCompile Include="CoreParameter.cpp" />
     <ClCompile Include="CoreTiming.cpp" />
     <ClCompile Include="ec_wii.cpp" />
+    <ClCompile Include="MemTools.cpp" />
     <ClCompile Include="Movie.cpp" />
     <ClCompile Include="NetPlayClient.cpp" />
     <ClCompile Include="NetPlayServer.cpp" />
     <ClCompile Include="PatchEngine.cpp" />
     <ClCompile Include="State.cpp" />
     <ClCompile Include="VolumeHandler.cpp" />
-    <ClCompile Include="x64MemTools.cpp" />
     <ClCompile Include="ActionReplay.cpp">
       <Filter>ActionReplay</Filter>
     </ClCompile>
@@ -511,6 +511,9 @@
     <ClCompile Include="HW\SystemTimers.cpp">
       <Filter>HW %28Flipper/Hollywood%29</Filter>
     </ClCompile>
+    <ClCompile Include="HW\WiiSaveCrypted.cpp">
+      <Filter>HW %28Flipper/Hollywood%29</Filter>
+    </ClCompile>
     <ClCompile Include="DSP\DSPAssembler.cpp">
       <Filter>DSPCore</Filter>
     </ClCompile>
@@ -628,13 +631,13 @@
     <ClCompile Include="PowerPC\JitCommon\JitAsmCommon.cpp">
       <Filter>PowerPC\JitCommon</Filter>
     </ClCompile>
-    <ClCompile Include="PowerPC\JitCommon\JitBackpatch.cpp">
-      <Filter>PowerPC\JitCommon</Filter>
-    </ClCompile>
     <ClCompile Include="PowerPC\JitCommon\JitBase.cpp">
       <Filter>PowerPC\JitCommon</Filter>
     </ClCompile>
     <ClCompile Include="PowerPC\JitCommon\JitCache.cpp">
+      <Filter>PowerPC\JitCommon</Filter>
+    </ClCompile>
+    <ClCompile Include="PowerPC\JitCommon\TrampolineCache.cpp">
       <Filter>PowerPC\JitCommon</Filter>
     </ClCompile>
     <ClCompile Include="PowerPC\Jit64IL\IR_X86.cpp">
@@ -676,7 +679,6 @@
     <ClCompile Include="PowerPC\Jit64\JitRegCache.cpp">
       <Filter>PowerPC\Jit64</Filter>
     </ClCompile>
-    <ClCompile Include="stdafx.cpp" />
     <ClCompile Include="PowerPC\JitILCommon\JitILBase_Branch.cpp">
       <Filter>PowerPC\JitILCommon</Filter>
     </ClCompile>
@@ -713,6 +715,7 @@
     <ClInclude Include="CoreTiming.h" />
     <ClInclude Include="ec_wii.h" />
     <ClInclude Include="Host.h" />
+    <ClCompile Include="MachineContext.h" />
     <ClInclude Include="MemTools.h" />
     <ClInclude Include="Movie.h" />
     <ClInclude Include="NetPlayClient.h" />
@@ -731,12 +734,6 @@
       <Filter>Boot</Filter>
     </ClInclude>
     <ClInclude Include="Boot\Boot_DOL.h">
-      <Filter>Boot</Filter>
-    </ClInclude>
-    <ClInclude Include="Boot\Boot_ELF.h">
-      <Filter>Boot</Filter>
-    </ClInclude>
-    <ClInclude Include="Boot\Boot_WiiWAD.h">
       <Filter>Boot</Filter>
     </ClInclude>
     <ClInclude Include="Boot\ElfReader.h">
@@ -1033,6 +1030,9 @@
     <ClInclude Include="HW\SystemTimers.h">
       <Filter>HW %28Flipper/Hollywood%29</Filter>
     </ClInclude>
+    <ClInclude Include="HW\WiiSaveCrypted.h">
+      <Filter>HW %28Flipper/Hollywood%29</Filter>
+    </ClInclude>
     <ClInclude Include="DSP\DSPAssembler.h">
       <Filter>DSPCore</Filter>
     </ClInclude>
@@ -1174,13 +1174,13 @@
     <ClInclude Include="PowerPC\JitCommon\JitAsmCommon.h">
       <Filter>PowerPC\JitCommon</Filter>
     </ClInclude>
-    <ClInclude Include="PowerPC\JitCommon\JitBackpatch.h">
-      <Filter>PowerPC\JitCommon</Filter>
-    </ClInclude>
     <ClInclude Include="PowerPC\JitCommon\JitBase.h">
       <Filter>PowerPC\JitCommon</Filter>
     </ClInclude>
     <ClInclude Include="PowerPC\JitCommon\JitCache.h">
+      <Filter>PowerPC\JitCommon</Filter>
+    </ClInclude>
+    <ClInclude Include="PowerPC\JitCommon\TrampolineCache.h">
       <Filter>PowerPC\JitCommon</Filter>
     </ClInclude>
     <ClInclude Include="PowerPC\Jit64IL\JitIL.h">
@@ -1195,7 +1195,6 @@
     <ClInclude Include="PowerPC\Jit64\JitAsm.h">
       <Filter>PowerPC\Jit64</Filter>
     </ClInclude>
-    <ClInclude Include="stdafx.h" />
     <ClInclude Include="PowerPC\JitILCommon\JitILBase.h">
       <Filter>PowerPC\JitILCommon</Filter>
     </ClInclude>

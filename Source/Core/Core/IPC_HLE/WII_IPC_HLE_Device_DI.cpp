@@ -3,8 +3,9 @@
 // Refer to the license.txt file included.
 
 #include <cinttypes>
+#include <memory>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/Logging/LogManager.h"
 
 #include "Core/Core.h"
@@ -107,19 +108,16 @@ bool CWII_IPC_HLE_Device_di::IOCtlV(u32 _CommandAddress)
 			_dbg_assert_msg_(WII_IPC_DVD, CommandBuffer.InBuffer[1].m_Address == 0, "DVDLowOpenPartition with ticket");
 			_dbg_assert_msg_(WII_IPC_DVD, CommandBuffer.InBuffer[2].m_Address == 0, "DVDLowOpenPartition with cert chain");
 
-			// Get TMD offset for requested partition...
-			u64 const TMDOffset = ((u64)Memory::Read_U32(CommandBuffer.InBuffer[0].m_Address + 4) << 2 ) + 0x2c0;
+			u64 const partition_offset = ((u64)Memory::Read_U32(CommandBuffer.InBuffer[0].m_Address + 4) << 2);
+			VolumeHandler::GetVolume()->ChangePartition(partition_offset);
 
-			INFO_LOG(WII_IPC_DVD, "DVDLowOpenPartition: TMDOffset 0x%016" PRIx64, TMDOffset);
-
-			static u32 const TMDsz = 0x208; //CommandBuffer.PayloadBuffer[0].m_Size;
-			u8 pTMD[TMDsz];
+			INFO_LOG(WII_IPC_DVD, "DVDLowOpenPartition: partition_offset 0x%016" PRIx64, partition_offset);
 
 			// Read TMD to the buffer
-			VolumeHandler::RAWReadToPtr(pTMD, TMDOffset, TMDsz);
-
-			memcpy(Memory::GetPointer(CommandBuffer.PayloadBuffer[0].m_Address), pTMD, TMDsz);
-			WII_IPC_HLE_Interface::ES_DIVerify(pTMD, TMDsz);
+			u32 tmd_size;
+			std::unique_ptr<u8[]> tmd_buf = VolumeHandler::GetVolume()->GetTMD(&tmd_size);
+			Memory::CopyToEmu(CommandBuffer.PayloadBuffer[0].m_Address, tmd_buf.get(), tmd_size);
+			WII_IPC_HLE_Interface::ES_DIVerify(tmd_buf.get(), tmd_size);
 
 			ReturnValue = 1;
 		}
@@ -167,7 +165,7 @@ u32 CWII_IPC_HLE_Device_di::ExecuteCommand(u32 _BufferIn, u32 _BufferInSize, u32
 	{
 	case DVDLowInquiry:
 		{
-			// (shuffle2) Taken from my wii
+			// (shuffle2) Taken from my Wii
 			Memory::Write_U32(0x00000002, _BufferOut);
 			Memory::Write_U32(0x20060526, _BufferOut + 4);
 			// This was in the oubuf even though this cmd is only supposed to reply with 64bits

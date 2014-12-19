@@ -182,7 +182,7 @@
 #define EXP_4           4 // 0x0008
 #define EXP_ACCOV       5 // 0x000a accelerator address overflow
 #define EXP_6           6 // 0x000c
-#define EXP_INT         7 // 0x000e external int (message from cpu)
+#define EXP_INT         7 // 0x000e external int (message from CPU)
 
 struct DSP_Regs
 {
@@ -192,25 +192,33 @@ struct DSP_Regs
 	u16 st[4];
 	u16 cr;
 	u16 sr;
-	union {
+
+	union
+	{
 		u64 val;
-		struct {
+		struct
+		{
 			u16 l;
 			u16 m;
 			u16 h;
 			u16 m2;//if this gets in the way, drop it.
 		};
 	} prod;
-	union {
+
+	union
+	{
 		u32 val;
 		struct {
 			u16 l;
 			u16 h;
 		};
 	} ax[2];
-	union {
+
+	union
+	{
 		u64 val;
-		struct {
+		struct
+		{
 			u16 l;
 			u16 m;
 			u16 h;

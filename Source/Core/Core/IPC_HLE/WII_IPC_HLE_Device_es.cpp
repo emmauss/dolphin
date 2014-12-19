@@ -136,9 +136,10 @@ void CWII_IPC_HLE_Device_es::DoState(PointerWrap& p)
 	u32 Count = (u32)(m_ContentAccessMap.size());
 	p.Do(Count);
 
-	u32 CFD, Position;
-	u64 TitleID;
-	u16 Index;
+	u32 CFD = 0;
+	u32 Position = 0;
+	u64 TitleID = 0;
+	u16 Index = 0;
 	if (p.GetMode() == PointerWrap::MODE_READ)
 	{
 		for (u32 i = 0; i < Count; i++)
@@ -638,8 +639,8 @@ bool CWII_IPC_HLE_Device_es::IOCtlV(u32 _CommandAddress)
 				for (unsigned int View = 0; View != maxViews && View < viewCnt; ++View)
 				{
 					Memory::Write_U32(View, Buffer.PayloadBuffer[0].m_Address + View * 0xD8);
-					Memory::WriteBigEData(Ticket + 0x1D0 + (View * DiscIO::INANDContentLoader::TICKET_SIZE),
-						Buffer.PayloadBuffer[0].m_Address + 4 + View * 0xD8, 212);
+					Memory::CopyToEmu(Buffer.PayloadBuffer[0].m_Address + 4 + View * 0xD8,
+						Ticket + 0x1D0 + (View * DiscIO::INANDContentLoader::TICKET_SIZE), 212);
 				}
 			}
 			else
@@ -654,7 +655,7 @@ bool CWII_IPC_HLE_Device_es::IOCtlV(u32 _CommandAddress)
 						for (unsigned int View = 0; View != maxViews && pFile.ReadBytes(FileTicket, DiscIO::INANDContentLoader::TICKET_SIZE); ++View)
 						{
 							Memory::Write_U32(View, Buffer.PayloadBuffer[0].m_Address + View * 0xD8);
-							Memory::WriteBigEData(FileTicket+0x1D0, Buffer.PayloadBuffer[0].m_Address + 4 + View * 0xD8, 212);
+							Memory::CopyToEmu(Buffer.PayloadBuffer[0].m_Address + 4 + View * 0xD8, FileTicket+0x1D0, 212);
 						}
 					}
 				}
@@ -665,11 +666,11 @@ bool CWII_IPC_HLE_Device_es::IOCtlV(u32 _CommandAddress)
 					// shouldn't matter at all.  Just fill out some fields just
 					// to be on the safe side.
 					u32 Address = Buffer.PayloadBuffer[0].m_Address;
-					memset(Memory::GetPointer(Address), 0, 0xD8);
+					Memory::Memset(Address, 0, 0xD8);
 					Memory::Write_U64(TitleID, Address + 4 + (0x1dc - 0x1d0)); // title ID
 					Memory::Write_U16(0xffff, Address + 4 + (0x1e4 - 0x1d0)); // unnnown
 					Memory::Write_U32(0xff00, Address + 4 + (0x1ec - 0x1d0)); // access mask
-					memset(Memory::GetPointer(Address + 4 + (0x222 - 0x1d0)), 0xff, 0x20); // content permissions
+					Memory::Memset(Address + 4 + (0x222 - 0x1d0), 0xff, 0x20); // content permissions
 				}
 				else
 				{
@@ -726,7 +727,7 @@ bool CWII_IPC_HLE_Device_es::IOCtlV(u32 _CommandAddress)
 			{
 				u32 Address = Buffer.PayloadBuffer[0].m_Address;
 
-				Memory::WriteBigEData(Loader.GetTMDView(), Address, DiscIO::INANDContentLoader::TMD_VIEW_SIZE);
+				Memory::CopyToEmu(Address, Loader.GetTMDView(), DiscIO::INANDContentLoader::TMD_VIEW_SIZE);
 				Address += DiscIO::INANDContentLoader::TMD_VIEW_SIZE;
 
 				Memory::Write_U16(Loader.GetTitleVersion(), Address); Address += 2;
@@ -834,13 +835,13 @@ bool CWII_IPC_HLE_Device_es::IOCtlV(u32 _CommandAddress)
 			{
 				u32 Address = Buffer.PayloadBuffer[0].m_Address;
 
-				Memory::WriteBigEData(Loader.GetTMDHeader(), Address, DiscIO::INANDContentLoader::TMD_HEADER_SIZE);
+				Memory::CopyToEmu(Address, Loader.GetTMDHeader(), DiscIO::INANDContentLoader::TMD_HEADER_SIZE);
 				Address += DiscIO::INANDContentLoader::TMD_HEADER_SIZE;
 
 				const std::vector<DiscIO::SNANDContent>& rContent = Loader.GetContent();
 				for (size_t i=0; i<Loader.GetContentSize(); i++)
 				{
-					Memory::WriteBigEData(rContent[i].m_Header, Address, DiscIO::INANDContentLoader::CONTENT_HEADER_SIZE);
+					Memory::CopyToEmu(Address, rContent[i].m_Header, DiscIO::INANDContentLoader::CONTENT_HEADER_SIZE);
 					Address += DiscIO::INANDContentLoader::CONTENT_HEADER_SIZE;
 				}
 

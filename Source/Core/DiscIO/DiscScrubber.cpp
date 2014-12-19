@@ -6,10 +6,11 @@
 #include <cinttypes>
 #include <cstddef>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "DiscIO/DiscScrubber.h"
 #include "DiscIO/Filesystem.h"
@@ -123,24 +124,27 @@ bool SetupScrub(const std::string& filename, int block_size)
 	return success;
 }
 
-void GetNextBlock(File::IOFile& in, u8* buffer)
+size_t GetNextBlock(File::IOFile& in, u8* buffer)
 {
 	u64 CurrentOffset = m_BlockCount * m_BlockSize;
 	u64 i = CurrentOffset / CLUSTER_SIZE;
 
+	size_t ReadBytes = 0;
 	if (m_isScrubbing && m_FreeTable[i])
 	{
 		DEBUG_LOG(DISCIO, "Freeing 0x%016" PRIx64, CurrentOffset);
 		std::fill(buffer, buffer + m_BlockSize, 0xFF);
 		in.Seek(m_BlockSize, SEEK_CUR);
+		ReadBytes = m_BlockSize;
 	}
 	else
 	{
 		DEBUG_LOG(DISCIO, "Used    0x%016" PRIx64, CurrentOffset);
-		in.ReadBytes(buffer, m_BlockSize);
+		in.ReadArray(buffer, m_BlockSize, &ReadBytes);
 	}
 
 	m_BlockCount++;
+	return ReadBytes;
 }
 
 void Cleanup()
@@ -275,9 +279,9 @@ bool ParsePartitionData(SPartition& _rPartition)
 
 	// Ready some stuff
 	m_Disc = CreateVolumeFromFilename(m_Filename, _rPartition.GroupNumber, _rPartition.Number);
-	IFileSystem *FileSystem = CreateFileSystem(m_Disc);
+	std::unique_ptr<IFileSystem> filesystem(CreateFileSystem(m_Disc));
 
-	if (!FileSystem)
+	if (!filesystem)
 	{
 		ERROR_LOG(DISCIO, "Failed to create filesystem for group %d partition %u", _rPartition.GroupNumber, _rPartition.Number);
 		ParsedOK = false;
@@ -285,7 +289,7 @@ bool ParsePartitionData(SPartition& _rPartition)
 	else
 	{
 		std::vector<const SFileInfo *> Files;
-		size_t numFiles = FileSystem->GetFileList(Files);
+		size_t numFiles = filesystem->GetFileList(Files);
 
 		// Mark things as used which are not in the filesystem
 		// Header, Header Information, Apploader
@@ -329,8 +333,6 @@ bool ParsePartitionData(SPartition& _rPartition)
 				, (*Files.at(currentFile)).m_Offset, (*Files.at(currentFile)).m_FileSize);
 		}
 	}
-
-	delete FileSystem;
 
 	// Swap back
 	delete m_Disc;

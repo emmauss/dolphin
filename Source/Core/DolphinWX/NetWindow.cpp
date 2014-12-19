@@ -28,7 +28,7 @@
 #include <wx/textctrl.h>
 #include <wx/translation.h>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FifoQueue.h"
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
@@ -47,14 +47,7 @@
 #include "DolphinWX/NetWindow.h"
 #include "DolphinWX/WxUtils.h"
 
-class wxWindow;
-
-#define NETPLAY_TITLEBAR  "Dolphin NetPlay"
-#define INITIAL_PAD_BUFFER_SIZE 20
-
-BEGIN_EVENT_TABLE(NetPlayDiag, wxFrame)
-	EVT_COMMAND(wxID_ANY, wxEVT_THREAD, NetPlayDiag::OnThread)
-END_EVENT_TABLE()
+#define INITIAL_PAD_BUFFER_SIZE 5
 
 static NetPlayServer* netplay_server = nullptr;
 static NetPlayClient* netplay_client = nullptr;
@@ -65,9 +58,7 @@ static std::string BuildGameName(const GameListItem& game)
 	// Lang needs to be consistent
 	auto const lang = 0;
 
-	std::string name(game.GetBannerName(lang));
-	if (name.empty())
-		name = game.GetVolumeName(lang);
+	std::string name(game.GetName(lang));
 
 	if (game.GetRevision() != 0)
 		return name + " (" + game.GetUniqueID() + ", Revision " + std::to_string((long long)game.GetRevision()) + ")";
@@ -82,7 +73,7 @@ static void FillWithGameNames(wxListBox* game_lbox, const CGameListCtrl& game_li
 }
 
 NetPlaySetupDiag::NetPlaySetupDiag(wxWindow* const parent, const CGameListCtrl* const game_list)
-	: wxFrame(parent, wxID_ANY, NETPLAY_TITLEBAR)
+	: wxFrame(parent, wxID_ANY, _("Dolphin NetPlay Setup"))
 	, m_game_list(game_list)
 {
 	IniFile inifile;
@@ -132,7 +123,6 @@ NetPlaySetupDiag::NetPlaySetupDiag(wxWindow* const parent, const CGameListCtrl* 
 	wxStaticText* const alert_lbl = new wxStaticText(connect_tab, wxID_ANY,
 		_("ALERT:\n\n"
 		"Netplay will only work with the following settings:\n"
-		" - Enable Dual Core [OFF]\n"
 		" - DSP Emulator Engine Must be the same on all computers!\n"
 		" - DSP on Dedicated Thread [OFF]\n"
 		" - Manually set the extensions for each wiimote\n"
@@ -309,11 +299,13 @@ void NetPlaySetupDiag::OnQuit(wxCommandEvent&)
 
 NetPlayDiag::NetPlayDiag(wxWindow* const parent, const CGameListCtrl* const game_list,
 		const std::string& game, const bool is_hosting)
-	: wxFrame(parent, wxID_ANY, NETPLAY_TITLEBAR)
+	: wxFrame(parent, wxID_ANY, _("Dolphin NetPlay"))
 	, m_selected_game(game)
 	, m_start_btn(nullptr)
 	, m_game_list(game_list)
 {
+	Bind(wxEVT_THREAD, &NetPlayDiag::OnThread, this);
+
 	wxPanel* const panel = new wxPanel(this);
 
 	// top crap
@@ -382,7 +374,7 @@ NetPlayDiag::NetPlayDiag(wxWindow* const parent, const CGameListCtrl* const game
 		bottom_szr->Add(m_start_btn);
 
 		bottom_szr->Add(new wxStaticText(panel, wxID_ANY, _("Buffer:")), 0, wxLEFT | wxCENTER, 5 );
-		wxSpinCtrl* const padbuf_spin = new wxSpinCtrl(panel, wxID_ANY, "20"
+		wxSpinCtrl* const padbuf_spin = new wxSpinCtrl(panel, wxID_ANY, std::to_string(INITIAL_PAD_BUFFER_SIZE)
 			, wxDefaultPosition, wxSize(64, -1), wxSP_ARROW_KEYS, 0, 200, INITIAL_PAD_BUFFER_SIZE);
 		padbuf_spin->Bind(wxEVT_SPINCTRL, &NetPlayDiag::OnAdjustBuffer, this);
 		bottom_szr->Add(padbuf_spin, 0, wxCENTER);
@@ -432,9 +424,6 @@ void NetPlayDiag::OnChat(wxCommandEvent&)
 
 	if (!text.empty())
 	{
-		if (text.length() > 2000)
-			text.erase(2000);
-
 		netplay_client->SendChatMessage(WxStrToStr(text));
 		m_chat_text->AppendText(text.Prepend(" >> ").Append('\n'));
 		m_chat_msg_text->Clear();
@@ -485,7 +474,7 @@ void NetPlayDiag::StopGame()
 // NetPlayUI methods called from ---NETPLAY--- thread
 void NetPlayDiag::Update()
 {
-	wxCommandEvent evt(wxEVT_THREAD, 1);
+	wxThreadEvent evt(wxEVT_THREAD, 1);
 	GetEventHandler()->AddPendingEvent(evt);
 }
 
@@ -498,15 +487,14 @@ void NetPlayDiag::AppendChat(const std::string& msg)
 
 void NetPlayDiag::OnMsgChangeGame(const std::string& filename)
 {
-	wxCommandEvent evt(wxEVT_THREAD, NP_GUI_EVT_CHANGE_GAME);
-	// TODO: using a wxString in AddPendingEvent from another thread is unsafe i guess?
-	evt.SetString(StrToWxStr(filename));
-	GetEventHandler()->AddPendingEvent(evt);
+	wxThreadEvent* evt = new wxThreadEvent(wxEVT_THREAD, NP_GUI_EVT_CHANGE_GAME);
+	evt->SetString(StrToWxStr(filename));
+	GetEventHandler()->QueueEvent(evt);
 }
 
 void NetPlayDiag::OnMsgStartGame()
 {
-	wxCommandEvent evt(wxEVT_THREAD, NP_GUI_EVT_START_GAME);
+	wxThreadEvent evt(wxEVT_THREAD, NP_GUI_EVT_START_GAME);
 	GetEventHandler()->AddPendingEvent(evt);
 	if (m_start_btn)
 		m_start_btn->Disable();
@@ -515,7 +503,7 @@ void NetPlayDiag::OnMsgStartGame()
 
 void NetPlayDiag::OnMsgStopGame()
 {
-	wxCommandEvent evt(wxEVT_THREAD, NP_GUI_EVT_STOP_GAME);
+	wxThreadEvent evt(wxEVT_THREAD, NP_GUI_EVT_STOP_GAME);
 	GetEventHandler()->AddPendingEvent(evt);
 	if (m_start_btn)
 		m_start_btn->Enable();
@@ -539,7 +527,7 @@ void NetPlayDiag::OnQuit(wxCommandEvent&)
 }
 
 // update gui
-void NetPlayDiag::OnThread(wxCommandEvent& event)
+void NetPlayDiag::OnThread(wxThreadEvent& event)
 {
 	// player list
 	m_playerids.clear();
@@ -587,7 +575,9 @@ void NetPlayDiag::OnThread(wxCommandEvent& event)
 		// update selected game :/
 		{
 		m_selected_game.assign(WxStrToStr(event.GetString()));
-		m_game_btn->SetLabel(event.GetString().Prepend(_(" Game : ")));
+
+		wxString button_label = event.GetString();
+		m_game_btn->SetLabel(button_label.Prepend(_(" Game : ")));
 		}
 		break;
 	case NP_GUI_EVT_START_GAME :

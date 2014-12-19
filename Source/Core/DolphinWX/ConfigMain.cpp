@@ -25,8 +25,8 @@
 
 #include "AudioCommon/AudioCommon.h"
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileSearch.h"
 #include "Common/SysConf.h"
 
@@ -62,12 +62,13 @@ struct CPUCore
 };
 const CPUCore CPUCores[] = {
 	{0, wxTRANSLATE("Interpreter (VERY slow)")},
-#ifdef _M_ARM
-	{3, wxTRANSLATE("Arm JIT (experimental)")},
-	{4, wxTRANSLATE("Arm JITIL (experimental)")},
-#else
+#ifdef _M_X86_64
 	{1, wxTRANSLATE("JIT Recompiler (recommended)")},
 	{2, wxTRANSLATE("JITIL Recompiler (slower, experimental)")},
+#elif defined(_M_ARM_32)
+	{3, wxTRANSLATE("Arm JIT (experimental)")},
+#elif defined(_M_ARM_64)
+	{4, wxTRANSLATE("Arm64 JIT (experimental)")},
 #endif
 };
 
@@ -106,13 +107,6 @@ static const wxLanguage langIds[] =
 #define DEV_NONE_STR        _trans("<Nothing>")
 #define DEV_DUMMY_STR       _trans("Dummy")
 
-#define SIDEV_STDCONT_STR   _trans("Standard Controller")
-#define SIDEV_STEERING_STR  _trans("Steering Wheel")
-#define SIDEV_DANCEMAT_STR  _trans("Dance Mat")
-#define SIDEV_BONGO_STR     _trans("TaruKonga (Bongos)")
-#define SIDEV_GBA_STR       "GBA"
-#define SIDEV_AM_BB_STR     _trans("AM-Baseboard")
-
 #define EXIDEV_MEMCARD_STR  _trans("Memory Card")
 #define EXIDEV_MEMDIR_STR   _trans("GCI Folder")
 #define EXIDEV_MIC_STR      _trans("Mic")
@@ -143,9 +137,7 @@ EVT_CHECKBOX(ID_NTSCJ, CConfigMain::CoreSettingsChanged)
 
 
 EVT_RADIOBOX(ID_DSPENGINE, CConfigMain::AudioSettingsChanged)
-EVT_CHECKBOX(ID_DSPTHREAD, CConfigMain::AudioSettingsChanged)
 EVT_CHECKBOX(ID_ENABLE_THROTTLE, CConfigMain::AudioSettingsChanged)
-EVT_CHECKBOX(ID_DUMP_AUDIO, CConfigMain::AudioSettingsChanged)
 EVT_CHECKBOX(ID_DPL2DECODER, CConfigMain::AudioSettingsChanged)
 EVT_CHOICE(ID_BACKEND, CConfigMain::AudioSettingsChanged)
 EVT_SLIDER(ID_VOLUME, CConfigMain::AudioSettingsChanged)
@@ -165,11 +157,6 @@ EVT_BUTTON(ID_GC_EXIDEVICE_SLOTA_PATH, CConfigMain::GCSettingsChanged)
 EVT_CHOICE(ID_GC_EXIDEVICE_SLOTB, CConfigMain::GCSettingsChanged)
 EVT_BUTTON(ID_GC_EXIDEVICE_SLOTB_PATH, CConfigMain::GCSettingsChanged)
 EVT_CHOICE(ID_GC_EXIDEVICE_SP1, CConfigMain::GCSettingsChanged)
-EVT_CHOICE(ID_GC_SIDEVICE0, CConfigMain::GCSettingsChanged)
-EVT_CHOICE(ID_GC_SIDEVICE1, CConfigMain::GCSettingsChanged)
-EVT_CHOICE(ID_GC_SIDEVICE2, CConfigMain::GCSettingsChanged)
-EVT_CHOICE(ID_GC_SIDEVICE3, CConfigMain::GCSettingsChanged)
-
 
 EVT_CHECKBOX(ID_WII_IPL_SSV, CConfigMain::WiiSettingsChanged)
 EVT_CHECKBOX(ID_WII_IPL_E60, CConfigMain::WiiSettingsChanged)
@@ -240,7 +227,6 @@ void CConfigMain::UpdateGUI()
 
 		// Disable stuff on AudioPage
 		DSPEngine->Disable();
-		DSPThread->Disable();
 		DPL2Decoder->Disable();
 		Latency->Disable();
 
@@ -250,7 +236,7 @@ void CConfigMain::UpdateGUI()
 
 		// Disable stuff on WiiPage
 		WiiScreenSaver->Disable();
-		WiiEuRGB60->Disable();
+		WiiPAL60->Disable();
 		WiiAspectRatio->Disable();
 		WiiSystemLang->Disable();
 
@@ -373,8 +359,6 @@ void CConfigMain::InitializeGUIValues()
 	VolumeSlider->Enable(SupportsVolumeChanges(SConfig::GetInstance().sBackend));
 	VolumeSlider->SetValue(SConfig::GetInstance().m_Volume);
 	VolumeText->SetLabel(wxString::Format("%d %%", SConfig::GetInstance().m_Volume));
-	DSPThread->SetValue(startup_params.bDSPThread);
-	DumpAudio->SetValue(SConfig::GetInstance().m_DumpAudio ? true : false);
 	DPL2Decoder->Enable(std::string(SConfig::GetInstance().sBackend) == BACKEND_OPENAL);
 	DPL2Decoder->SetValue(startup_params.bDPL2Decoder);
 	Latency->Enable(std::string(SConfig::GetInstance().sBackend) == BACKEND_OPENAL);
@@ -405,14 +389,6 @@ void CConfigMain::InitializeGUIValues()
 		SP1Devices.Add(_(EXIDEV_BBA_STR));
 		SP1Devices.Add(_(EXIDEV_AM_BB_STR));
 
-	wxArrayString SIDevices;
-		SIDevices.Add(_(DEV_NONE_STR));
-		SIDevices.Add(_(SIDEV_STDCONT_STR));
-		SIDevices.Add(_(SIDEV_STEERING_STR));
-		SIDevices.Add(_(SIDEV_DANCEMAT_STR));
-		SIDevices.Add(_(SIDEV_BONGO_STR));
-		SIDevices.Add(_(SIDEV_GBA_STR));
-		SIDevices.Add(_(SIDEV_AM_BB_STR));
 
 	for (int i = 0; i < 3; ++i)
 	{
@@ -455,43 +431,10 @@ void CConfigMain::InitializeGUIValues()
 		if (!isMemcard && i < 2)
 			GCMemcardPath[i]->Disable();
 	}
-	for (int i = 0; i < 4; ++i)
-	{
-		// Add string to the wxChoice list
-		GCSIDevice[i]->Append(SIDevices);
-
-		switch (SConfig::GetInstance().m_SIDevice[i])
-		{
-		case SIDEVICE_GC_CONTROLLER:
-			GCSIDevice[i]->SetStringSelection(SIDevices[1]);
-			break;
-		case SIDEVICE_GC_STEERING:
-			GCSIDevice[i]->SetStringSelection(SIDevices[2]);
-			break;
-		case SIDEVICE_DANCEMAT:
-			GCSIDevice[i]->SetStringSelection(SIDevices[3]);
-			break;
-		case SIDEVICE_GC_TARUKONGA:
-			GCSIDevice[i]->SetStringSelection(SIDevices[4]);
-			break;
-		case SIDEVICE_GC_GBA:
-			GCSIDevice[i]->SetStringSelection(SIDevices[5]);
-			break;
-		case SIDEVICE_AM_BASEBOARD:
-			GCSIDevice[i]->SetStringSelection(SIDevices[6]);
-			break;
-		default:
-			GCSIDevice[i]->SetStringSelection(SIDevices[0]);
-			break;
-		}
-		// Remove the AM baseboard from the list, only the first list can select it
-		if (i == 0)
-			SIDevices.RemoveAt(SIDevices.GetCount() - 1);
-	}
 
 	// Wii - Misc
 	WiiScreenSaver->SetValue(!!SConfig::GetInstance().m_SYSCONF->GetData<u8>("IPL.SSV"));
-	WiiEuRGB60->SetValue(!!SConfig::GetInstance().m_SYSCONF->GetData<u8>("IPL.E60"));
+	WiiPAL60->SetValue(!!SConfig::GetInstance().m_SYSCONF->GetData<u8>("IPL.E60"));
 	WiiAspectRatio->SetSelection(SConfig::GetInstance().m_SYSCONF->GetData<u8>("IPL.AR"));
 	WiiSystemLang->SetSelection(SConfig::GetInstance().m_SYSCONF->GetData<u8>("IPL.LNG"));
 
@@ -502,7 +445,7 @@ void CConfigMain::InitializeGUIValues()
 
 	// Paths
 	RecursiveISOPath->SetValue(SConfig::GetInstance().m_RecursiveISOFolder);
-	DefaultISO->SetPath(StrToWxStr(startup_params.m_strDefaultGCM));
+	DefaultISO->SetPath(StrToWxStr(startup_params.m_strDefaultISO));
 	DVDRoot->SetPath(StrToWxStr(startup_params.m_strDVDRoot));
 	ApploaderPath->SetPath(StrToWxStr(startup_params.m_strApploader));
 	NANDRoot->SetPath(StrToWxStr(SConfig::GetInstance().m_NANDPath));
@@ -525,7 +468,6 @@ void CConfigMain::InitializeGUITooltips()
 	InterfaceLang->SetToolTip(_("Change the language of the user interface.\nRequires restart."));
 
 	// Audio tooltips
-	DSPThread->SetToolTip(_("Run DSP LLE on a dedicated thread (not recommended: might cause freezes)."));
 	BackendSelection->SetToolTip(_("Changing this will have no effect while the emulator is running!"));
 
 	// GameCube - Devices
@@ -656,8 +598,6 @@ void CConfigMain::CreateGUIControls()
 
 	// Audio page
 	DSPEngine = new wxRadioBox(AudioPage, ID_DSPENGINE, _("DSP Emulator Engine"), wxDefaultPosition, wxDefaultSize, arrayStringFor_DSPEngine, 0, wxRA_SPECIFY_ROWS);
-	DSPThread = new wxCheckBox(AudioPage, ID_DSPTHREAD, _("DSPLLE on Separate Thread"));
-	DumpAudio = new wxCheckBox(AudioPage, ID_DUMP_AUDIO, _("Dump Audio"));
 	DPL2Decoder = new wxCheckBox(AudioPage, ID_DPL2DECODER, _("Dolby Pro Logic II decoder"));
 	VolumeSlider = new wxSlider(AudioPage, ID_VOLUME, 0, 1, 100, wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL|wxSL_INVERSE);
 	VolumeText = new wxStaticText(AudioPage, wxID_ANY, "");
@@ -676,8 +616,6 @@ void CConfigMain::CreateGUIControls()
 	// Create sizer and add items to dialog
 	wxStaticBoxSizer *sbAudioSettings = new wxStaticBoxSizer(wxVERTICAL, AudioPage, _("Sound Settings"));
 	sbAudioSettings->Add(DSPEngine, 0, wxALL | wxEXPAND, 5);
-	sbAudioSettings->Add(DSPThread, 0, wxALL, 5);
-	sbAudioSettings->Add(DumpAudio, 0, wxALL, 5);
 	sbAudioSettings->Add(DPL2Decoder, 0, wxALL, 5);
 
 	wxStaticBoxSizer *sbVolume = new wxStaticBoxSizer(wxVERTICAL, AudioPage, _("Volume"));
@@ -706,6 +644,18 @@ void CConfigMain::CreateGUIControls()
 	// IPL settings
 	GCSystemLang = new wxChoice(GamecubePage, ID_GC_SRAM_LNG, wxDefaultPosition, wxDefaultSize, arrayStringFor_GCSystemLang);
 	GCAlwaysHLE_BS2 = new wxCheckBox(GamecubePage, ID_GC_ALWAYS_HLE_BS2, _("Skip BIOS"));
+
+	if (!File::Exists(File::GetUserPath(D_GCUSER_IDX) + DIR_SEP + USA_DIR + DIR_SEP GC_IPL) &&
+	    !File::Exists(File::GetSysDirectory() + GC_SYS_DIR + DIR_SEP + USA_DIR + DIR_SEP GC_IPL) &&
+	    !File::Exists(File::GetUserPath(D_GCUSER_IDX) + DIR_SEP + JAP_DIR + DIR_SEP GC_IPL) &&
+	    !File::Exists(File::GetSysDirectory() + GC_SYS_DIR + DIR_SEP + JAP_DIR + DIR_SEP GC_IPL) &&
+	    !File::Exists(File::GetUserPath(D_GCUSER_IDX) + DIR_SEP + EUR_DIR + DIR_SEP GC_IPL) &&
+	    !File::Exists(File::GetSysDirectory() + GC_SYS_DIR + DIR_SEP + EUR_DIR + DIR_SEP GC_IPL))
+	{
+		GCAlwaysHLE_BS2->Disable();
+		GCAlwaysHLE_BS2->SetToolTip(_("Put BIOS roms in User/GC/{region}."));
+	}
+
 	// Device settings
 	// EXI Devices
 	wxStaticText* GCEXIDeviceText[3];
@@ -719,17 +669,6 @@ void CConfigMain::CreateGUIControls()
 			wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
 	GCMemcardPath[1] = new wxButton(GamecubePage, ID_GC_EXIDEVICE_SLOTB_PATH, "...",
 			wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
-
-	//SI Devices
-	wxStaticText* GCSIDeviceText[4];
-	GCSIDeviceText[0] = TEXT_BOX(GamecubePage, _("Port 1"));
-	GCSIDeviceText[1] = TEXT_BOX(GamecubePage, _("Port 2"));
-	GCSIDeviceText[2] = TEXT_BOX(GamecubePage, _("Port 3"));
-	GCSIDeviceText[3] = TEXT_BOX(GamecubePage, _("Port 4"));
-	GCSIDevice[0] = new wxChoice(GamecubePage, ID_GC_SIDEVICE0);
-	GCSIDevice[1] = new wxChoice(GamecubePage, ID_GC_SIDEVICE1);
-	GCSIDevice[2] = new wxChoice(GamecubePage, ID_GC_SIDEVICE2);
-	GCSIDevice[3] = new wxChoice(GamecubePage, ID_GC_SIDEVICE3);
 
 	// Populate the GameCube page
 	sGamecubeIPLSettings = new wxGridBagSizer();
@@ -752,28 +691,15 @@ void CConfigMain::CreateGUIControls()
 	}
 	sbGamecubeDeviceSettings->Add(sbGamecubeEXIDevSettings, 0, wxALL, 5);
 
-	wxFlexGridSizer* sbGamecubeDevSettings = new wxFlexGridSizer(2, 10, 10);
-	for (int i = 0; i < 4; ++i)
-	{
-		sbGamecubeDevSettings->Add(GCSIDeviceText[i], 1, wxALIGN_CENTER_VERTICAL|wxLEFT|wxRIGHT|wxBOTTOM, 0);
-		sbGamecubeDevSettings->Add(GCSIDevice[i], 1, wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM, 0);
-		if (NetPlay::IsNetPlayRunning() || Movie::IsRecordingInput() || Movie::IsPlayingInput())
-		{
-			GCSIDevice[i]->Disable();
-		}
-	}
-	sbGamecubeDeviceSettings->Add(sbGamecubeDevSettings, 0, wxALL, 5);
-
 	sGamecubePage = new wxBoxSizer(wxVERTICAL);
 	sGamecubePage->Add(sbGamecubeIPLSettings, 0, wxEXPAND|wxALL, 5);
 	sGamecubePage->Add(sbGamecubeDeviceSettings, 0, wxEXPAND|wxALL, 5);
 	GamecubePage->SetSizer(sGamecubePage);
 
-
 	// Wii page
 	// Misc Settings
 	WiiScreenSaver = new wxCheckBox(WiiPage, ID_WII_IPL_SSV, _("Enable Screen Saver"));
-	WiiEuRGB60 = new wxCheckBox(WiiPage, ID_WII_IPL_E60, _("Use EuRGB60 Mode (PAL60)"));
+	WiiPAL60 = new wxCheckBox(WiiPage, ID_WII_IPL_E60, _("Use PAL60 Mode (EuRGB60)"));
 	WiiAspectRatio = new wxChoice(WiiPage, ID_WII_IPL_AR, wxDefaultPosition, wxDefaultSize, arrayStringFor_WiiAspectRatio);
 	WiiSystemLang = new wxChoice(WiiPage, ID_WII_IPL_LNG, wxDefaultPosition, wxDefaultSize, arrayStringFor_WiiSystemLang);
 
@@ -784,7 +710,7 @@ void CConfigMain::CreateGUIControls()
 	// Populate the Wii Page
 	sWiiIPLSettings = new wxGridBagSizer();
 	sWiiIPLSettings->Add(WiiScreenSaver, wxGBPosition(0, 0), wxGBSpan(1, 2), wxALL, 5);
-	sWiiIPLSettings->Add(WiiEuRGB60, wxGBPosition(1, 0), wxGBSpan(1, 2), wxALL, 5);
+	sWiiIPLSettings->Add(WiiPAL60, wxGBPosition(1, 0), wxGBSpan(1, 2), wxALL, 5);
 	sWiiIPLSettings->Add(TEXT_BOX(WiiPage, _("Aspect Ratio:")),
 			wxGBPosition(2, 0), wxDefaultSpan, wxALIGN_CENTER_VERTICAL|wxALL, 5);
 	sWiiIPLSettings->Add(WiiAspectRatio, wxGBPosition(2, 1), wxDefaultSpan, wxALL, 5);
@@ -812,7 +738,7 @@ void CConfigMain::CreateGUIControls()
 	RemoveISOPath->Enable(false);
 
 	DefaultISO = new wxFilePickerCtrl(PathsPage, ID_DEFAULTISO, wxEmptyString, _("Choose a default ISO:"),
-		_("All GC/Wii images (gcm, iso, wbfs, ciso, gcz)") + wxString::Format("|*.gcm;*.iso;*.wbfs;*.ciso;*.gcz|%s", wxGetTranslation(wxALL_FILES)),
+		_("All GC/Wii files (elf, dol, gcm, iso, wbfs, ciso, gcz, wad)") + wxString::Format("|*.elf;*.dol;*.gcm;*.iso;*.wbfs;*.ciso;*.gcz;*.wad|%s", wxGetTranslation(wxALL_FILES)),
 		wxDefaultPosition, wxDefaultSize, wxFLP_USE_TEXTCTRL|wxFLP_OPEN);
 	DVDRoot = new wxDirPickerCtrl(PathsPage, ID_DVDROOT, wxEmptyString, _("Choose a DVD root directory:"), wxDefaultPosition, wxDefaultSize, wxDIRP_USE_TEXTCTRL);
 	ApploaderPath = new wxFilePickerCtrl(PathsPage, ID_APPLOADERPATH, wxEmptyString, _("Choose file to use as apploader: (applies to discs constructed from directories only)"),
@@ -881,32 +807,36 @@ void CConfigMain::OnOk(wxCommandEvent& WXUNUSED (event))
 // Core settings
 void CConfigMain::CoreSettingsChanged(wxCommandEvent& event)
 {
+	SCoreStartupParameter& startup_params = SConfig::GetInstance().m_LocalCoreStartupParameter;
+
 	switch (event.GetId())
 	{
 	// Core - Basic
 	case ID_CPUTHREAD:
 		if (Core::IsRunning())
 			return;
-		SConfig::GetInstance().m_LocalCoreStartupParameter.bCPUThread = CPUThread->IsChecked();
+		startup_params.bCPUThread = CPUThread->IsChecked();
 		break;
 	case ID_IDLESKIP:
-		SConfig::GetInstance().m_LocalCoreStartupParameter.bSkipIdle = SkipIdle->IsChecked();
+		startup_params.bSkipIdle = SkipIdle->IsChecked();
 		break;
 	case ID_ENABLECHEATS:
-		SConfig::GetInstance().m_LocalCoreStartupParameter.bEnableCheats = EnableCheats->IsChecked();
+		startup_params.bEnableCheats = EnableCheats->IsChecked();
 		break;
 	case ID_FRAMELIMIT:
 		SConfig::GetInstance().m_Framelimit = Framelimit->GetSelection();
 		break;
 	// Core - Advanced
 	case ID_CPUENGINE:
-		SConfig::GetInstance().m_LocalCoreStartupParameter.iCPUCore = CPUCores[CPUEngine->GetSelection()].CPUid;
+		startup_params.iCPUCore = CPUCores[CPUEngine->GetSelection()].CPUid;
 		if (main_frame->g_pCodeWindow)
-			main_frame->g_pCodeWindow->GetMenuBar()->Check(IDM_INTERPRETER,
-				SConfig::GetInstance().m_LocalCoreStartupParameter.iCPUCore?false:true);
+		{
+			bool using_interp = (startup_params.iCPUCore == SCoreStartupParameter::CORE_INTERPRETER);
+			main_frame->g_pCodeWindow->GetMenuBar()->Check(IDM_INTERPRETER, using_interp);
+		}
 		break;
 	case ID_NTSCJ:
-		SConfig::GetInstance().m_LocalCoreStartupParameter.bForceNTSCJ = _NTSCJ->IsChecked();
+		startup_params.bForceNTSCJ = _NTSCJ->IsChecked();
 		break;
 	}
 }
@@ -960,10 +890,6 @@ void CConfigMain::AudioSettingsChanged(wxCommandEvent& event)
 		VolumeText->SetLabel(wxString::Format("%d %%", VolumeSlider->GetValue()));
 		break;
 
-	case ID_DSPTHREAD:
-		SConfig::GetInstance().m_LocalCoreStartupParameter.bDSPThread = DSPThread->IsChecked();
-		break;
-
 	case ID_DPL2DECODER:
 		SConfig::GetInstance().m_LocalCoreStartupParameter.bDPL2Decoder = DPL2Decoder->IsChecked();
 		break;
@@ -983,7 +909,6 @@ void CConfigMain::AudioSettingsChanged(wxCommandEvent& event)
 		break;
 
 	default:
-		SConfig::GetInstance().m_DumpAudio = DumpAudio->GetValue();
 		break;
 	}
 }
@@ -1004,8 +929,7 @@ bool CConfigMain::SupportsVolumeChanges(std::string backend)
 	//FIXME: this one should ask the backend whether it supports it.
 	//       but getting the backend from string etc. is probably
 	//       too much just to enable/disable a stupid slider...
-	return (backend == BACKEND_DIRECTSOUND ||
-			backend == BACKEND_COREAUDIO ||
+	return (backend == BACKEND_COREAUDIO ||
 			backend == BACKEND_OPENAL ||
 			backend == BACKEND_XAUDIO2);
 }
@@ -1015,7 +939,6 @@ bool CConfigMain::SupportsVolumeChanges(std::string backend)
 // -----------------------
 void CConfigMain::GCSettingsChanged(wxCommandEvent& event)
 {
-	int sidevice = 0;
 	int exidevice = 0;
 	switch (event.GetId())
 	{
@@ -1041,15 +964,6 @@ void CConfigMain::GCSettingsChanged(wxCommandEvent& event)
 		break;
 	case ID_GC_EXIDEVICE_SLOTB_PATH:
 		ChooseMemcardPath(SConfig::GetInstance().m_strMemoryCardB, false);
-		break;
-	case ID_GC_SIDEVICE3:
-		sidevice++;
-	case ID_GC_SIDEVICE2:
-		sidevice++;
-	case ID_GC_SIDEVICE1:
-		sidevice++;
-	case ID_GC_SIDEVICE0:
-		ChooseSIDevice(event.GetString(), sidevice);
 		break;
 	}
 }
@@ -1112,33 +1026,6 @@ void CConfigMain::ChooseMemcardPath(std::string& strMemcard, bool isSlotA)
 	}
 }
 
-void CConfigMain::ChooseSIDevice(wxString deviceName, int deviceNum)
-{
-	SIDevices tempType;
-	if (!deviceName.compare(_(SIDEV_STDCONT_STR)))
-		tempType = SIDEVICE_GC_CONTROLLER;
-	else if (!deviceName.compare(_(SIDEV_STEERING_STR)))
-		tempType = SIDEVICE_GC_STEERING;
-	else if (!deviceName.compare(_(SIDEV_DANCEMAT_STR)))
-		tempType = SIDEVICE_DANCEMAT;
-	else if (!deviceName.compare(_(SIDEV_BONGO_STR)))
-		tempType = SIDEVICE_GC_TARUKONGA;
-	else if (!deviceName.compare(SIDEV_GBA_STR))
-		tempType = SIDEVICE_GC_GBA;
-	else if (!deviceName.compare(_(SIDEV_AM_BB_STR)))
-		tempType = SIDEVICE_AM_BASEBOARD;
-	else
-		tempType = SIDEVICE_NONE;
-
-	SConfig::GetInstance().m_SIDevice[deviceNum] = tempType;
-
-	if (Core::IsRunning())
-	{
-		// Change plugged device! :D
-		SerialInterface::ChangeDevice(tempType, deviceNum);
-	}
-}
-
 void CConfigMain::ChooseEXIDevice(wxString deviceName, int deviceNum)
 {
 	TEXIDevices tempType;
@@ -1192,7 +1079,7 @@ void CConfigMain::WiiSettingsChanged(wxCommandEvent& event)
 		SConfig::GetInstance().m_SYSCONF->SetData("IPL.SSV", WiiScreenSaver->IsChecked());
 		break;
 	case ID_WII_IPL_E60:
-		SConfig::GetInstance().m_SYSCONF->SetData("IPL.E60", WiiEuRGB60->IsChecked());
+		SConfig::GetInstance().m_SYSCONF->SetData("IPL.E60", WiiPAL60->IsChecked());
 		break;
 	case ID_WII_IPL_AR:
 		SConfig::GetInstance().m_SYSCONF->SetData("IPL.AR", WiiAspectRatio->GetSelection());
@@ -1273,7 +1160,7 @@ void CConfigMain::RecursiveDirectoryChanged(wxCommandEvent& WXUNUSED (event))
 
 void CConfigMain::DefaultISOChanged(wxFileDirPickerEvent& WXUNUSED (event))
 {
-	SConfig::GetInstance().m_LocalCoreStartupParameter.m_strDefaultGCM = WxStrToStr(DefaultISO->GetPath());
+	SConfig::GetInstance().m_LocalCoreStartupParameter.m_strDefaultISO = WxStrToStr(DefaultISO->GetPath());
 }
 
 void CConfigMain::DVDRootChanged(wxFileDirPickerEvent& WXUNUSED (event))

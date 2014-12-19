@@ -2,10 +2,12 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include <cfloat>
 #include <cmath>
 #include <sstream>
 
-#include "Common/Common.h"
+#include "Common/BitSet.h"
+#include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/CPMemory.h"
@@ -22,7 +24,7 @@ static float GC_ALIGNED16(g_fProjectionMatrix[16]);
 
 // track changes
 static bool bTexMatricesChanged[2], bPosNormalMatrixChanged, bProjectionChanged, bViewportChanged;
-static int nMaterialsChanged;
+static BitSet32 nMaterialsChanged;
 static int nTransformMatricesChanged[2]; // min,max
 static int nNormalMatricesChanged[2]; // min,max
 static int nPostTransformMatricesChanged[2]; // min,max
@@ -202,7 +204,7 @@ void VertexShaderManager::Dirty()
 
 	bProjectionChanged = true;
 
-	nMaterialsChanged = 15;
+	nMaterialsChanged = BitSet32::AllTrue(4);
 
 	dirty = true;
 }
@@ -285,51 +287,33 @@ void VertexShaderManager::SetConstants()
 			              double(light.ddir[1]) * double(light.ddir[1]) +
 			              double(light.ddir[2]) * double(light.ddir[2]);
 			norm = 1.0 / sqrt(norm);
-			dstlight.dir[0] = light.ddir[0] * norm;
-			dstlight.dir[1] = light.ddir[1] * norm;
-			dstlight.dir[2] = light.ddir[2] * norm;
+			float norm_float = static_cast<float>(norm);
+			dstlight.dir[0] = light.ddir[0] * norm_float;
+			dstlight.dir[1] = light.ddir[1] * norm_float;
+			dstlight.dir[2] = light.ddir[2] * norm_float;
 		}
 		dirty = true;
 
 		nLightsChanged[0] = nLightsChanged[1] = -1;
 	}
 
-	if (nMaterialsChanged)
+	for (int i : nMaterialsChanged)
 	{
-		for (int i = 0; i < 2; ++i)
-		{
-			if (nMaterialsChanged & (1 << i))
-			{
-				u32 data = xfmem.ambColor[i];
-				constants.materials[i][0] = (data >> 24) & 0xFF;
-				constants.materials[i][1] = (data >> 16) & 0xFF;
-				constants.materials[i][2] = (data >>  8) & 0xFF;
-				constants.materials[i][3] =  data        & 0xFF;
-			}
-		}
-
-		for (int i = 0; i < 2; ++i)
-		{
-			if (nMaterialsChanged & (1 << (i + 2)))
-			{
-				u32 data = xfmem.matColor[i];
-				constants.materials[i+2][0] = (data >> 24) & 0xFF;
-				constants.materials[i+2][1] = (data >> 16) & 0xFF;
-				constants.materials[i+2][2] = (data >>  8) & 0xFF;
-				constants.materials[i+2][3] =  data        & 0xFF;
-			}
-		}
+		u32 data = i >= 2 ? xfmem.matColor[i - 2] : xfmem.ambColor[i];
+		constants.materials[i][0] = (data >> 24) & 0xFF;
+		constants.materials[i][1] = (data >> 16) & 0xFF;
+		constants.materials[i][2] = (data >>  8) & 0xFF;
+		constants.materials[i][3] =  data        & 0xFF;
 		dirty = true;
-
-		nMaterialsChanged = 0;
 	}
+	nMaterialsChanged = BitSet32(0);
 
 	if (bPosNormalMatrixChanged)
 	{
 		bPosNormalMatrixChanged = false;
 
-		const float *pos = (const float *)xfmem.posMatrices + MatrixIndexA.PosNormalMtxIdx * 4;
-		const float *norm = (const float *)xfmem.normalMatrices + 3 * (MatrixIndexA.PosNormalMtxIdx & 31);
+		const float *pos = (const float *)xfmem.posMatrices + g_main_cp_state.matrix_index_a.PosNormalMtxIdx * 4;
+		const float *norm = (const float *)xfmem.normalMatrices + 3 * (g_main_cp_state.matrix_index_a.PosNormalMtxIdx & 31);
 
 		memcpy(constants.posnormalmatrix, pos, 3*16);
 		memcpy(constants.posnormalmatrix[3], norm, 12);
@@ -343,10 +327,10 @@ void VertexShaderManager::SetConstants()
 		bTexMatricesChanged[0] = false;
 		const float *fptrs[] =
 		{
-			(const float *)&xfmem.posMatrices[MatrixIndexA.Tex0MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexA.Tex1MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexA.Tex2MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexA.Tex3MtxIdx * 4]
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_a.Tex0MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_a.Tex1MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_a.Tex2MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_a.Tex3MtxIdx * 4]
 		};
 
 		for (int i = 0; i < 4; ++i)
@@ -360,10 +344,10 @@ void VertexShaderManager::SetConstants()
 	{
 		bTexMatricesChanged[1] = false;
 		const float *fptrs[] = {
-			(const float *)&xfmem.posMatrices[MatrixIndexB.Tex4MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexB.Tex5MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexB.Tex6MtxIdx * 4],
-			(const float *)&xfmem.posMatrices[MatrixIndexB.Tex7MtxIdx * 4]
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_b.Tex4MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_b.Tex5MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_b.Tex6MtxIdx * 4],
+			(const float *)&xfmem.posMatrices[g_main_cp_state.matrix_index_b.Tex7MtxIdx * 4]
 		};
 
 		for (int i = 0; i < 4; ++i)
@@ -376,8 +360,6 @@ void VertexShaderManager::SetConstants()
 	if (bViewportChanged)
 	{
 		bViewportChanged = false;
-		constants.depthparams[0] = xfmem.viewport.farZ / 16777216.0f;
-		constants.depthparams[1] = xfmem.viewport.zRange / 16777216.0f;
 
 		// The console GPU places the pixel center at 7/12 unless antialiasing
 		// is enabled, while D3D and OpenGL place it at 0.5. See the comment
@@ -387,8 +369,8 @@ void VertexShaderManager::SetConstants()
 		const float pixel_center_correction = 7.0f / 12.0f - 0.5f;
 		const float pixel_size_x = 2.f / Renderer::EFBToScaledXf(2.f * xfmem.viewport.wd);
 		const float pixel_size_y = 2.f / Renderer::EFBToScaledXf(2.f * xfmem.viewport.ht);
-		constants.depthparams[2] = pixel_center_correction * pixel_size_x;
-		constants.depthparams[3] = pixel_center_correction * pixel_size_y;
+		constants.pixelcentercorrection[0] = pixel_center_correction * pixel_size_x;
+		constants.pixelcentercorrection[1] = pixel_center_correction * pixel_size_y;
 		dirty = true;
 		// This is so implementation-dependent that we can't have it here.
 		g_renderer->SetViewport();
@@ -474,7 +456,7 @@ void VertexShaderManager::SetConstants()
 			g_fProjectionMatrix[13] = 0.0f;
 
 			g_fProjectionMatrix[14] = 0.0f;
-			g_fProjectionMatrix[15] = 1.0f;
+			g_fProjectionMatrix[15] = 1.0f + FLT_EPSILON; // hack to fix depth clipping precision issues (such as Sonic Unleashed UI)
 
 			SETSTAT_FT(stats.g2proj_0, g_fProjectionMatrix[0]);
 			SETSTAT_FT(stats.g2proj_1, g_fProjectionMatrix[1]);
@@ -506,7 +488,7 @@ void VertexShaderManager::SetConstants()
 
 		PRIM_LOG("Projection: %f %f %f %f %f %f\n", rawProjection[0], rawProjection[1], rawProjection[2], rawProjection[3], rawProjection[4], rawProjection[5]);
 
-		if ((g_ActiveConfig.bFreeLook || g_ActiveConfig.bAnaglyphStereo ) && xfmem.projection.type == GX_PERSPECTIVE)
+		if (g_ActiveConfig.bFreeLook && xfmem.projection.type == GX_PERSPECTIVE)
 		{
 			Matrix44 mtxA;
 			Matrix44 mtxB;
@@ -529,32 +511,33 @@ void VertexShaderManager::SetConstants()
 			Matrix44::Multiply(s_viewportCorrection, projMtx, correctedMtx);
 			memcpy(constants.projection, correctedMtx.data, 4*16);
 		}
+
 		dirty = true;
 	}
 }
 
 void VertexShaderManager::InvalidateXFRange(int start, int end)
 {
-	if (((u32)start >= (u32)MatrixIndexA.PosNormalMtxIdx * 4 &&
-		 (u32)start <  (u32)MatrixIndexA.PosNormalMtxIdx * 4 + 12) ||
-		((u32)start >= XFMEM_NORMALMATRICES + ((u32)MatrixIndexA.PosNormalMtxIdx & 31) * 3 &&
-		 (u32)start <  XFMEM_NORMALMATRICES + ((u32)MatrixIndexA.PosNormalMtxIdx & 31) * 3 + 9))
+	if (((u32)start >= (u32)g_main_cp_state.matrix_index_a.PosNormalMtxIdx * 4 &&
+		 (u32)start <  (u32)g_main_cp_state.matrix_index_a.PosNormalMtxIdx * 4 + 12) ||
+		((u32)start >= XFMEM_NORMALMATRICES + ((u32)g_main_cp_state.matrix_index_a.PosNormalMtxIdx & 31) * 3 &&
+		 (u32)start <  XFMEM_NORMALMATRICES + ((u32)g_main_cp_state.matrix_index_a.PosNormalMtxIdx & 31) * 3 + 9))
 	{
 		bPosNormalMatrixChanged = true;
 	}
 
-	if (((u32)start >= (u32)MatrixIndexA.Tex0MtxIdx*4 && (u32)start < (u32)MatrixIndexA.Tex0MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexA.Tex1MtxIdx*4 && (u32)start < (u32)MatrixIndexA.Tex1MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexA.Tex2MtxIdx*4 && (u32)start < (u32)MatrixIndexA.Tex2MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexA.Tex3MtxIdx*4 && (u32)start < (u32)MatrixIndexA.Tex3MtxIdx*4+12))
+	if (((u32)start >= (u32)g_main_cp_state.matrix_index_a.Tex0MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_a.Tex0MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_a.Tex1MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_a.Tex1MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_a.Tex2MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_a.Tex2MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_a.Tex3MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_a.Tex3MtxIdx*4+12))
 	{
 		bTexMatricesChanged[0] = true;
 	}
 
-	if (((u32)start >= (u32)MatrixIndexB.Tex4MtxIdx*4 && (u32)start < (u32)MatrixIndexB.Tex4MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexB.Tex5MtxIdx*4 && (u32)start < (u32)MatrixIndexB.Tex5MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexB.Tex6MtxIdx*4 && (u32)start < (u32)MatrixIndexB.Tex6MtxIdx*4+12) ||
-		((u32)start >= (u32)MatrixIndexB.Tex7MtxIdx*4 && (u32)start < (u32)MatrixIndexB.Tex7MtxIdx*4+12))
+	if (((u32)start >= (u32)g_main_cp_state.matrix_index_b.Tex4MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_b.Tex4MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_b.Tex5MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_b.Tex5MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_b.Tex6MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_b.Tex6MtxIdx*4+12) ||
+		((u32)start >= (u32)g_main_cp_state.matrix_index_b.Tex7MtxIdx*4 && (u32)start < (u32)g_main_cp_state.matrix_index_b.Tex7MtxIdx*4+12))
 	{
 		bTexMatricesChanged[1] = true;
 	}
@@ -627,23 +610,23 @@ void VertexShaderManager::InvalidateXFRange(int start, int end)
 
 void VertexShaderManager::SetTexMatrixChangedA(u32 Value)
 {
-	if (MatrixIndexA.Hex != Value)
+	if (g_main_cp_state.matrix_index_a.Hex != Value)
 	{
 		VertexManager::Flush();
-		if (MatrixIndexA.PosNormalMtxIdx != (Value&0x3f))
+		if (g_main_cp_state.matrix_index_a.PosNormalMtxIdx != (Value&0x3f))
 			bPosNormalMatrixChanged = true;
 		bTexMatricesChanged[0] = true;
-		MatrixIndexA.Hex = Value;
+		g_main_cp_state.matrix_index_a.Hex = Value;
 	}
 }
 
 void VertexShaderManager::SetTexMatrixChangedB(u32 Value)
 {
-	if (MatrixIndexB.Hex != Value)
+	if (g_main_cp_state.matrix_index_b.Hex != Value)
 	{
 		VertexManager::Flush();
 		bTexMatricesChanged[1] = true;
-		MatrixIndexB.Hex = Value;
+		g_main_cp_state.matrix_index_b.Hex = Value;
 	}
 }
 
@@ -659,7 +642,7 @@ void VertexShaderManager::SetProjectionChanged()
 
 void VertexShaderManager::SetMaterialColorChanged(int index, u32 color)
 {
-	nMaterialsChanged  |= (1 << index);
+	nMaterialsChanged[index] = true;
 }
 
 void VertexShaderManager::TranslateView(float x, float y, float z)

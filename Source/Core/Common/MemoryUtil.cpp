@@ -6,8 +6,11 @@
 #include <cstdlib>
 #include <string>
 
-#include "Common/Common.h"
+#include "Common/CommonFuncs.h"
+#include "Common/CommonTypes.h"
 #include "Common/MemoryUtil.h"
+#include "Common/MsgHandler.h"
+#include "Common/Logging/Log.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -91,10 +94,10 @@ void* AllocateMemoryPages(size_t size)
 #else
 	void* ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
 			MAP_ANON | MAP_PRIVATE, -1, 0);
-#endif
 
-	// printf("Mapped memory at %p (size %ld)\n", ptr,
-	//	(unsigned long)size);
+	if (ptr == MAP_FAILED)
+		ptr = nullptr;
+#endif
 
 	if (ptr == nullptr)
 		PanicAlert("Failed to allocate raw memory");
@@ -129,14 +132,20 @@ void FreeMemoryPages(void* ptr, size_t size)
 {
 	if (ptr)
 	{
+		bool error_occurred = false;
+
 #ifdef _WIN32
 		if (!VirtualFree(ptr, 0, MEM_RELEASE))
-		{
-			PanicAlert("FreeMemoryPages failed!\n%s", GetLastErrorMsg());
-		}
+			error_occurred = true;
 #else
-		munmap(ptr, size);
+		int retval = munmap(ptr, size);
+
+		if (retval != 0)
+			error_occurred = true;
 #endif
+
+		if (error_occurred)
+			PanicAlert("FreeMemoryPages failed!\n%s", GetLastErrorMsg());
 	}
 }
 
@@ -152,26 +161,61 @@ void FreeAlignedMemory(void* ptr)
 	}
 }
 
+void ReadProtectMemory(void* ptr, size_t size)
+{
+	bool error_occurred = false;
+
+#ifdef _WIN32
+	DWORD oldValue;
+	if (!VirtualProtect(ptr, size, PAGE_NOACCESS, &oldValue))
+		error_occurred = true;
+#else
+	int retval = mprotect(ptr, size, PROT_NONE);
+
+	if (retval != 0)
+		error_occurred = true;
+#endif
+
+	if (error_occurred)
+		PanicAlert("ReadProtectMemory failed!\n%s", GetLastErrorMsg());
+}
+
 void WriteProtectMemory(void* ptr, size_t size, bool allowExecute)
 {
+	bool error_occurred = false;
+
 #ifdef _WIN32
 	DWORD oldValue;
 	if (!VirtualProtect(ptr, size, allowExecute ? PAGE_EXECUTE_READ : PAGE_READONLY, &oldValue))
-		PanicAlert("WriteProtectMemory failed!\n%s", GetLastErrorMsg());
+		error_occurred = true;
 #else
-	mprotect(ptr, size, allowExecute ? (PROT_READ | PROT_EXEC) : PROT_READ);
+	int retval = mprotect(ptr, size, allowExecute ? (PROT_READ | PROT_EXEC) : PROT_READ);
+
+	if (retval != 0)
+		error_occurred = true;
 #endif
+
+	if (error_occurred)
+		PanicAlert("WriteProtectMemory failed!\n%s", GetLastErrorMsg());
 }
 
 void UnWriteProtectMemory(void* ptr, size_t size, bool allowExecute)
 {
+	bool error_occurred = false;
+
 #ifdef _WIN32
 	DWORD oldValue;
 	if (!VirtualProtect(ptr, size, allowExecute ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE, &oldValue))
-		PanicAlert("UnWriteProtectMemory failed!\n%s", GetLastErrorMsg());
+		error_occurred = true;
 #else
-	mprotect(ptr, size, allowExecute ? (PROT_READ | PROT_WRITE | PROT_EXEC) : PROT_WRITE | PROT_READ);
+	int retval = mprotect(ptr, size, allowExecute ? (PROT_READ | PROT_WRITE | PROT_EXEC) : PROT_WRITE | PROT_READ);
+
+	if (retval != 0)
+		error_occurred = true;
 #endif
+
+	if (error_occurred)
+		PanicAlert("UnWriteProtectMemory failed!\n%s", GetLastErrorMsg());
 }
 
 std::string MemUsage()

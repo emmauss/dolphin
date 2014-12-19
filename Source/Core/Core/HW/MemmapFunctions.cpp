@@ -16,8 +16,9 @@
 // http://code.google.com/p/dolphin-emu/
 
 #include "Common/Atomic.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/HW/GPFifo.h"
 #include "Core/HW/Memmap.h"
@@ -32,6 +33,8 @@
 
 namespace Memory
 {
+
+#define HW_PAGE_SIZE 4096
 
 // EFB RE
 /*
@@ -54,10 +57,12 @@ GXPeekZ
 // ----------------
 
 // Overloaded byteswap functions, for use within the templated functions below.
-inline u8 bswap(u8 val)   {return val;}
-inline u16 bswap(u16 val) {return Common::swap16(val);}
-inline u32 bswap(u32 val) {return Common::swap32(val);}
-inline u64 bswap(u64 val) {return Common::swap64(val);}
+inline u8 bswap(u8 val)   { return val; }
+inline s8 bswap(s8 val)   { return val; }
+inline u16 bswap(u16 val) { return Common::swap16(val); }
+inline s16 bswap(s16 val) { return Common::swap16(val); }
+inline u32 bswap(u32 val) { return Common::swap32(val); }
+inline u64 bswap(u64 val) { return Common::swap64(val); }
 // =================
 
 
@@ -70,10 +75,13 @@ static u32 EFB_Read(const u32 addr)
 	int x = (addr & 0xfff) >> 2;
 	int y = (addr >> 12) & 0x3ff;
 
-	if (addr & 0x00400000) {
+	if (addr & 0x00400000)
+	{
 		var = g_video_backend->Video_AccessEFB(PEEK_Z, x, y, 0);
 		DEBUG_LOG(MEMMAP, "EFB Z Read @ %i, %i\t= 0x%08x", x, y, var);
-	} else {
+	}
+	else
+	{
 		var = g_video_backend->Video_AccessEFB(PEEK_COLOR, x, y, 0);
 		DEBUG_LOG(MEMMAP, "EFB Color Read @ %i, %i\t= 0x%08x", x, y, var);
 	}
@@ -83,8 +91,8 @@ static u32 EFB_Read(const u32 addr)
 
 static void GenerateDSIException(u32 _EffectiveAddress, bool _bWrite);
 
-template <typename T>
-inline void ReadFromHardware(T &_var, const u32 em_address, const u32 effective_address, Memory::XCheckTLBFlag flag)
+template <typename T, typename U>
+inline void ReadFromHardware(U &_var, const u32 em_address, Memory::XCheckTLBFlag flag)
 {
 	// TODO: Figure out the fastest order of tests for both read and write (they are probably different).
 	if ((em_address & 0xC8000000) == 0xC8000000)
@@ -92,7 +100,7 @@ inline void ReadFromHardware(T &_var, const u32 em_address, const u32 effective_
 		if (em_address < 0xcc000000)
 			_var = EFB_Read(em_address);
 		else
-			_var = mmio_mapping->Read<T>(em_address);
+			_var = (T)mmio_mapping->Read<typename std::make_unsigned<T>::type>(em_address);
 	}
 	else if (((em_address & 0xF0000000) == 0x80000000) ||
 		((em_address & 0xF0000000) == 0xC0000000) ||
@@ -119,24 +127,79 @@ inline void ReadFromHardware(T &_var, const u32 em_address, const u32 effective_
 	else
 	{
 		// MMU
-		u32 tlb_addr = TranslateAddress(em_address, flag);
-		if (tlb_addr == 0)
+		// Handle loads that cross page boundaries (ewwww)
+		if (sizeof(T) > 1 && (em_address & (HW_PAGE_SIZE - 1)) > HW_PAGE_SIZE - sizeof(T))
 		{
-			if (flag == FLAG_READ)
+			_var = 0;
+			// This could be unaligned down to the byte level... hopefully this is rare, so doing it this
+			// way isn't too terrible.
+			// TODO: floats on non-word-aligned boundaries should technically cause alignment exceptions.
+			// Note that "word" means 32-bit, so paired singles or doubles might still be 32-bit aligned!
+			u32 tlb_addr = TranslateAddress(em_address, flag);
+			for (u32 addr = em_address; addr < em_address + sizeof(T); addr++, tlb_addr++)
 			{
-				GenerateDSIException(em_address, false);
+				// Start of the new page... translate the address again!
+				if (!(addr & (HW_PAGE_SIZE-1)))
+					tlb_addr = TranslateAddress(addr, flag);
+				// Important: we need to generate the DSI on the first store that caused the fault, NOT
+				// the address of the start of the load.
+				if (tlb_addr == 0)
+				{
+					if (flag == FLAG_READ)
+					{
+						if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
+							PanicAlertT("Invalid Read at 0x%08x, PC = 0x%08x ", em_address, PC);
+						else
+							GenerateDSIException(addr, false);
+						break;
+					}
+				}
+				else
+				{
+					if (m_pEXRAM && (tlb_addr & 0xF0000000) == 0x10000000)
+					{
+						_var <<= 8;
+						_var |= m_pEXRAM[tlb_addr & EXRAM_MASK];
+					}
+					else
+					{
+						_var <<= 8;
+						_var |= m_pRAM[tlb_addr & RAM_MASK];
+					}
+				}
 			}
 		}
 		else
 		{
-			_var = bswap((*(const T*)&m_pRAM[tlb_addr & RAM_MASK]));
+			u32 tlb_addr = TranslateAddress(em_address, flag);
+			if (tlb_addr == 0)
+			{
+				if (flag == FLAG_READ)
+				{
+					if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
+						PanicAlertT("Invalid Read at 0x%08x, PC = 0x%08x ", em_address, PC);
+					else
+						GenerateDSIException(em_address, false);
+				}
+			}
+			else
+			{
+				if (m_pEXRAM && (tlb_addr & 0xF0000000) == 0x10000000)
+				{
+					_var = bswap((*(const T*)&m_pEXRAM[tlb_addr & EXRAM_MASK]));
+				}
+				else
+				{
+					_var = bswap((*(const T*)&m_pRAM[tlb_addr & RAM_MASK]));
+				}
+			}
 		}
 	}
 }
 
 
 template <typename T>
-inline void WriteToHardware(u32 em_address, const T data, u32 effective_address, Memory::XCheckTLBFlag flag)
+inline void WriteToHardware(u32 em_address, const T data, Memory::XCheckTLBFlag flag)
 {
 	// First, let's check for FIFO writes, since they are probably the most common
 	// reason we end up in this function:
@@ -183,9 +246,9 @@ inline void WriteToHardware(u32 em_address, const T data, u32 effective_address,
 		*(T*)&m_pRAM[em_address & RAM_MASK] = bswap(data);
 		return;
 	}
-	else if (((em_address & 0xF0000000) == 0x90000000) ||
+	else if (m_pEXRAM && (((em_address & 0xF0000000) == 0x90000000) ||
 		((em_address & 0xF0000000) == 0xD0000000) ||
-		((em_address & 0xF0000000) == 0x10000000))
+		((em_address & 0xF0000000) == 0x10000000)))
 	{
 		*(T*)&m_pEXRAM[em_address & EXRAM_MASK] = bswap(data);
 		return;
@@ -204,17 +267,65 @@ inline void WriteToHardware(u32 em_address, const T data, u32 effective_address,
 	else
 	{
 		// MMU
-		u32 tlb_addr = TranslateAddress(em_address, flag);
-		if (tlb_addr == 0)
+		// Handle stores that cross page boundaries (ewwww)
+		if (sizeof(T) > 1 && (em_address & (HW_PAGE_SIZE-1)) > HW_PAGE_SIZE - sizeof(T))
 		{
-			if (flag == FLAG_WRITE)
+			T val = bswap(data);
+			u32 tlb_addr = TranslateAddress(em_address, flag);
+			for (u32 addr = em_address; addr < em_address + sizeof(T); addr++, tlb_addr++)
 			{
-				GenerateDSIException(em_address, true);
+				if (!(addr & (HW_PAGE_SIZE-1)))
+					tlb_addr = TranslateAddress(addr, flag);
+				if (tlb_addr == 0)
+				{
+					if (flag == FLAG_WRITE)
+					{
+						if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
+							PanicAlertT("Invalid Write to 0x%08x, PC = 0x%08x ", em_address, PC);
+						else
+							GenerateDSIException(addr, true);
+						break;
+					}
+				}
+				else
+				{
+					if (m_pEXRAM && (tlb_addr & 0xF0000000) == 0x10000000)
+					{
+						m_pEXRAM[tlb_addr & EXRAM_MASK] = (u8)val;
+						val >>= 8;
+					}
+					else
+					{
+						m_pRAM[tlb_addr & RAM_MASK] = (u8)val;
+						val >>= 8;
+					}
+				}
 			}
 		}
 		else
 		{
-			*(T*)&m_pRAM[tlb_addr & RAM_MASK] = bswap(data);
+			u32 tlb_addr = TranslateAddress(em_address, flag);
+			if (tlb_addr == 0)
+			{
+				if (flag == FLAG_WRITE)
+				{
+					if (!SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU)
+						PanicAlertT("Invalid Write to 0x%08x, PC = 0x%08x ", em_address, PC);
+					else
+						GenerateDSIException(em_address, true);
+				}
+			}
+			else
+			{
+				if (m_pEXRAM && (tlb_addr & 0xF0000000) == 0x10000000)
+				{
+					*(T*)&m_pEXRAM[tlb_addr & EXRAM_MASK] = bswap(data);
+				}
+				else
+				{
+					*(T*)&m_pRAM[tlb_addr & RAM_MASK] = bswap(data);
+				}
+			}
 		}
 	}
 }
@@ -237,8 +348,7 @@ u32 Read_Opcode(u32 _Address)
 		return 0x00000000;
 	}
 
-	if (Core::g_CoreStartupParameter.bMMU &&
-		!Core::g_CoreStartupParameter.bTLBHack &&
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bMMU &&
 		(_Address & ADDR_MASK_MEM1))
 	{
 		// TODO: Check for MSR instruction address translation flag before translating
@@ -260,7 +370,7 @@ u32 Read_Opcode(u32 _Address)
 u8 Read_U8(const u32 _Address)
 {
 	u8 _var = 0;
-	ReadFromHardware<u8>(_var, _Address, _Address, FLAG_READ);
+	ReadFromHardware<u8>(_var, _Address, FLAG_READ);
 #ifdef ENABLE_MEM_CHECK
 	TMemCheck *mc = PowerPC::memchecks.GetMemCheck(_Address);
 	if (mc)
@@ -275,7 +385,7 @@ u8 Read_U8(const u32 _Address)
 u16 Read_U16(const u32 _Address)
 {
 	u16 _var = 0;
-	ReadFromHardware<u16>(_var, _Address, _Address, FLAG_READ);
+	ReadFromHardware<u16>(_var, _Address, FLAG_READ);
 #ifdef ENABLE_MEM_CHECK
 	TMemCheck *mc = PowerPC::memchecks.GetMemCheck(_Address);
 	if (mc)
@@ -290,7 +400,7 @@ u16 Read_U16(const u32 _Address)
 u32 Read_U32(const u32 _Address)
 {
 	u32 _var = 0;
-	ReadFromHardware<u32>(_var, _Address, _Address, FLAG_READ);
+	ReadFromHardware<u32>(_var, _Address, FLAG_READ);
 #ifdef ENABLE_MEM_CHECK
 	TMemCheck *mc = PowerPC::memchecks.GetMemCheck(_Address);
 	if (mc)
@@ -305,7 +415,7 @@ u32 Read_U32(const u32 _Address)
 u64 Read_U64(const u32 _Address)
 {
 	u64 _var = 0;
-	ReadFromHardware<u64>(_var, _Address, _Address, FLAG_READ);
+	ReadFromHardware<u64>(_var, _Address, FLAG_READ);
 #ifdef ENABLE_MEM_CHECK
 	TMemCheck *mc = PowerPC::memchecks.GetMemCheck(_Address);
 	if (mc)
@@ -341,6 +451,42 @@ float Read_F32(const u32 _Address)
 	return cvt.d;
 }
 
+u32 Read_U8_Val(u32 address, u32 val)
+{
+	ReadFromHardware<u8>(val, address, FLAG_READ);
+	return val;
+}
+
+u32 Read_S8_Val(u32 address, u32 val)
+{
+	ReadFromHardware<s8>(val, address, FLAG_READ);
+	return val;
+}
+
+u32 Read_U16_Val(u32 address, u32 val)
+{
+	ReadFromHardware<u16>(val, address, FLAG_READ);
+	return val;
+}
+
+u32 Read_S16_Val(u32 address, u32 val)
+{
+	ReadFromHardware<s16>(val, address, FLAG_READ);
+	return val;
+}
+
+u32 Read_U32_Val(u32 address, u32 val)
+{
+	ReadFromHardware<u32>(val, address, FLAG_READ);
+	return val;
+}
+
+u64 Read_U64_Val(u32 address, u64 val)
+{
+	ReadFromHardware<u64>(val, address, FLAG_READ);
+	return val;
+}
+
 u32 Read_U8_ZX(const u32 _Address)
 {
 	return (u32)Read_U8(_Address);
@@ -361,7 +507,7 @@ void Write_U8(const u8 _Data, const u32 _Address)
 		mc->Action(&PowerPC::debug_interface, _Data,_Address,true,1,PC);
 	}
 #endif
-	WriteToHardware<u8>(_Address, _Data, _Address, FLAG_WRITE);
+	WriteToHardware<u8>(_Address, _Data, FLAG_WRITE);
 }
 
 
@@ -376,9 +522,10 @@ void Write_U16(const u16 _Data, const u32 _Address)
 	}
 #endif
 
-	WriteToHardware<u16>(_Address, _Data, _Address, FLAG_WRITE);
+	WriteToHardware<u16>(_Address, _Data, FLAG_WRITE);
 }
-void Write_U16_Swap(const u16 _Data, const u32 _Address) {
+void Write_U16_Swap(const u16 _Data, const u32 _Address)
+{
 	Write_U16(Common::swap16(_Data), _Address);
 }
 
@@ -393,7 +540,7 @@ void Write_U32(const u32 _Data, const u32 _Address)
 		mc->Action(&PowerPC::debug_interface, _Data,_Address,true,4,PC);
 	}
 #endif
-	WriteToHardware<u32>(_Address, _Data, _Address, FLAG_WRITE);
+	WriteToHardware<u32>(_Address, _Data, FLAG_WRITE);
 }
 void Write_U32_Swap(const u32 _Data, const u32 _Address)
 {
@@ -411,9 +558,10 @@ void Write_U64(const u64 _Data, const u32 _Address)
 	}
 #endif
 
-	WriteToHardware<u64>(_Address, _Data, _Address + 4, FLAG_WRITE);
+	WriteToHardware<u64>(_Address, _Data, FLAG_WRITE);
 }
-void Write_U64_Swap(const u64 _Data, const u32 _Address) {
+void Write_U64_Swap(const u64 _Data, const u32 _Address)
+{
 	Write_U64(Common::swap64(_Data), _Address);
 }
 
@@ -430,7 +578,7 @@ void Write_F64(const double _Data, const u32 _Address)
 u8 ReadUnchecked_U8(const u32 _Address)
 {
 	u8 _var = 0;
-	ReadFromHardware<u8>(_var, _Address, _Address, FLAG_NO_EXCEPTION);
+	ReadFromHardware<u8>(_var, _Address, FLAG_NO_EXCEPTION);
 	return _var;
 }
 
@@ -438,19 +586,19 @@ u8 ReadUnchecked_U8(const u32 _Address)
 u32 ReadUnchecked_U32(const u32 _Address)
 {
 	u32 _var = 0;
-	ReadFromHardware<u32>(_var, _Address, _Address, FLAG_NO_EXCEPTION);
+	ReadFromHardware<u32>(_var, _Address, FLAG_NO_EXCEPTION);
 	return _var;
 }
 
 void WriteUnchecked_U8(const u8 _iValue, const u32 _Address)
 {
-	WriteToHardware<u8>(_Address, _iValue, _Address, FLAG_NO_EXCEPTION);
+	WriteToHardware<u8>(_Address, _iValue, FLAG_NO_EXCEPTION);
 }
 
 
 void WriteUnchecked_U32(const u32 _iValue, const u32 _Address)
 {
-	WriteToHardware<u32>(_Address, _iValue, _Address, FLAG_NO_EXCEPTION);
+	WriteToHardware<u32>(_Address, _iValue, FLAG_NO_EXCEPTION);
 }
 
 // *********************************************************************************
@@ -594,91 +742,74 @@ void SDRUpdated()
 }
 
 
-// TLB cache
-//#define FAST_TLB_CACHE
-
-#define TLB_SIZE 128
-#define TLB_WAYS 2
-#define NUM_TLBS 2
-
-#define HW_PAGE_SIZE 4096
-#define HW_PAGE_INDEX_SHIFT 12
-#define HW_PAGE_INDEX_MASK 0x3f
-#define HW_PAGE_TAG_SHIFT 18
-
-#define TLB_FLAG_MOST_RECENT 0x01
-#define TLB_FLAG_INVALID 0x02
-
-struct tlb_entry
-{
-	u32 tag;
-	u32 paddr;
-	u8 flags;
-};
-
-// TODO: tlb needs to be in ppcState for save-state purposes.
-#ifdef FAST_TLB_CACHE
-static tlb_entry tlb[NUM_TLBS][TLB_SIZE/TLB_WAYS][TLB_WAYS];
-#endif
-
 static u32 LookupTLBPageAddress(const XCheckTLBFlag _Flag, const u32 vpa, u32 *paddr)
 {
-#ifdef FAST_TLB_CACHE
-	tlb_entry *tlbe = tlb[_Flag == FLAG_OPCODE][(vpa>>HW_PAGE_INDEX_SHIFT)&HW_PAGE_INDEX_MASK];
+	PowerPC::tlb_entry *tlbe = PowerPC::ppcState.tlb[_Flag == FLAG_OPCODE][(vpa >> HW_PAGE_INDEX_SHIFT) & HW_PAGE_INDEX_MASK];
 	if (tlbe[0].tag == (vpa & ~0xfff) && !(tlbe[0].flags & TLB_FLAG_INVALID))
 	{
-		tlbe[0].flags |= TLB_FLAG_MOST_RECENT;
-		tlbe[1].flags &= ~TLB_FLAG_MOST_RECENT;
+		// Check if C bit requires updating
+		if (_Flag == FLAG_WRITE)
+		{
+			UPTE2 PTE2;
+			PTE2.Hex = tlbe[0].pte;
+			if (PTE2.C == 0)
+			{
+				PTE2.C = 1;
+				tlbe[0].pte = PTE2.Hex;
+				return 0;
+			}
+		}
+
+		if (_Flag != FLAG_NO_EXCEPTION)
+		{
+			tlbe[0].flags |= TLB_FLAG_MOST_RECENT;
+			tlbe[1].flags &= ~TLB_FLAG_MOST_RECENT;
+		}
+
 		*paddr = tlbe[0].paddr | (vpa & 0xfff);
+
 		return 1;
 	}
 	if (tlbe[1].tag == (vpa & ~0xfff) && !(tlbe[1].flags & TLB_FLAG_INVALID))
 	{
-		tlbe[1].flags |= TLB_FLAG_MOST_RECENT;
-		tlbe[0].flags &= ~TLB_FLAG_MOST_RECENT;
+		// Check if C bit requires updating
+		if (_Flag == FLAG_WRITE)
+		{
+			UPTE2 PTE2;
+			PTE2.Hex = tlbe[1].pte;
+			if (PTE2.C == 0)
+			{
+				PTE2.C = 1;
+				tlbe[1].pte = PTE2.Hex;
+				return 0;
+			}
+		}
+
+		if (_Flag != FLAG_NO_EXCEPTION)
+		{
+			tlbe[1].flags |= TLB_FLAG_MOST_RECENT;
+			tlbe[0].flags &= ~TLB_FLAG_MOST_RECENT;
+		}
+
 		*paddr = tlbe[1].paddr | (vpa & 0xfff);
+
 		return 1;
 	}
 	return 0;
-#else
-	u32 _Address = vpa;
-	if (_Flag == FLAG_OPCODE)
-	{
-		for (u32 i = (PowerPC::ppcState.itlb_last); i > (PowerPC::ppcState.itlb_last - 128); i--)
-		{
-			if ((_Address & ~0xfff) == (PowerPC::ppcState.itlb_va[i & 127]))
-			{
-				*paddr = PowerPC::ppcState.itlb_pa[i & 127] | (_Address & 0xfff);
-				PowerPC::ppcState.itlb_last = i;
-				return 1;
-			}
-		}
-	}
-	else
-	{
-		for (u32 i = (PowerPC::ppcState.dtlb_last); i > (PowerPC::ppcState.dtlb_last - 128); i--)
-		{
-			if ((_Address & ~0xfff) == (PowerPC::ppcState.dtlb_va[i & 127]))
-			{
-				*paddr = PowerPC::ppcState.dtlb_pa[i & 127] | (_Address & 0xfff);
-				PowerPC::ppcState.dtlb_last = i;
-				return 1;
-			}
-		}
-	}
-	return 0;
-#endif
 }
 
 static void UpdateTLBEntry(const XCheckTLBFlag _Flag, UPTE2 PTE2, const u32 vpa)
 {
-#ifdef FAST_TLB_CACHE
-	tlb_entry *tlbe = tlb[_Flag == FLAG_OPCODE][(vpa>>HW_PAGE_INDEX_SHIFT)&HW_PAGE_INDEX_MASK];
-	if ((tlbe[0].flags & TLB_FLAG_MOST_RECENT) == 0)
+	if (_Flag == FLAG_NO_EXCEPTION)
+		return;
+
+	PowerPC::tlb_entry *tlbe = PowerPC::ppcState.tlb[_Flag == FLAG_OPCODE][(vpa >> HW_PAGE_INDEX_SHIFT) & HW_PAGE_INDEX_MASK];
+	if ((tlbe[0].flags & TLB_FLAG_MOST_RECENT) == 0 || (tlbe[0].flags & TLB_FLAG_INVALID))
 	{
 		tlbe[0].flags = TLB_FLAG_MOST_RECENT;
 		tlbe[1].flags &= ~TLB_FLAG_MOST_RECENT;
 		tlbe[0].paddr = PTE2.RPN << HW_PAGE_INDEX_SHIFT;
+		tlbe[0].pte = PTE2.Hex;
 		tlbe[0].tag = vpa & ~0xfff;
 	}
 	else
@@ -686,65 +817,19 @@ static void UpdateTLBEntry(const XCheckTLBFlag _Flag, UPTE2 PTE2, const u32 vpa)
 		tlbe[1].flags = TLB_FLAG_MOST_RECENT;
 		tlbe[0].flags &= ~TLB_FLAG_MOST_RECENT;
 		tlbe[1].paddr = PTE2.RPN << HW_PAGE_INDEX_SHIFT;
+		tlbe[1].pte = PTE2.Hex;
 		tlbe[1].tag = vpa & ~0xfff;
 	}
-#else
-	if (_Flag == FLAG_OPCODE)
-	{
-		// ITLB cache
-		PowerPC::ppcState.itlb_last++;
-		PowerPC::ppcState.itlb_last &= 127;
-		PowerPC::ppcState.itlb_pa[PowerPC::ppcState.itlb_last] = PTE2.RPN << HW_PAGE_INDEX_SHIFT;
-		PowerPC::ppcState.itlb_va[PowerPC::ppcState.itlb_last] = vpa & ~0xfff;
-	}
-	else
-	{
-		// DTLB cache
-		PowerPC::ppcState.dtlb_last++;
-		PowerPC::ppcState.dtlb_last &= 127;
-		PowerPC::ppcState.dtlb_pa[PowerPC::ppcState.dtlb_last] = PTE2.RPN << HW_PAGE_INDEX_SHIFT;
-		PowerPC::ppcState.dtlb_va[PowerPC::ppcState.dtlb_last] = vpa & ~0xfff;
-	}
-#endif
 }
 
 void InvalidateTLBEntry(u32 vpa)
 {
-#ifdef FAST_TLB_CACHE
-	tlb_entry *tlbe = tlb[0][(vpa>>HW_PAGE_INDEX_SHIFT)&HW_PAGE_INDEX_MASK];
-	if (tlbe[0].tag == (vpa & ~0xfff))
-	{
-		tlbe[0].flags |= TLB_FLAG_INVALID;
-	}
-	if (tlbe[1].tag == (vpa & ~0xfff))
-	{
-		tlbe[1].flags |= TLB_FLAG_INVALID;
-	}
-	tlb_entry *tlbe_i = tlb[1][(vpa>>HW_PAGE_INDEX_SHIFT)&HW_PAGE_INDEX_MASK];
-	if (tlbe_i[0].tag == (vpa & ~0xfff))
-	{
-		tlbe_i[0].flags |= TLB_FLAG_INVALID;
-	}
-	if (tlbe_i[1].tag == (vpa & ~0xfff))
-	{
-		tlbe_i[1].flags |= TLB_FLAG_INVALID;
-	}
-#else
-	u32 _Address = vpa;
-	for (int i = 0; i < 128; i++)
-	{
-		if ((_Address & ~0xfff) == (PowerPC::ppcState.dtlb_va[(PowerPC::ppcState.dtlb_last + i) & 127]))
-		{
-			PowerPC::ppcState.dtlb_pa[(PowerPC::ppcState.dtlb_last + i) & 127] = 0;
-			PowerPC::ppcState.dtlb_va[(PowerPC::ppcState.dtlb_last + i) & 127] = 0;
-		}
-		if ((_Address & ~0xfff) == (PowerPC::ppcState.itlb_va[(PowerPC::ppcState.itlb_last + i) & 127]))
-		{
-			PowerPC::ppcState.itlb_pa[(PowerPC::ppcState.itlb_last + i) & 127] = 0;
-			PowerPC::ppcState.itlb_va[(PowerPC::ppcState.itlb_last + i) & 127] = 0;
-		}
-	}
-#endif
+	PowerPC::tlb_entry *tlbe = PowerPC::ppcState.tlb[0][(vpa >> HW_PAGE_INDEX_SHIFT) & HW_PAGE_INDEX_MASK];
+	tlbe[0].flags |= TLB_FLAG_INVALID;
+	tlbe[1].flags |= TLB_FLAG_INVALID;
+	PowerPC::tlb_entry *tlbe_i = PowerPC::ppcState.tlb[1][(vpa >> HW_PAGE_INDEX_SHIFT) & HW_PAGE_INDEX_MASK];
+	tlbe_i[0].flags |= TLB_FLAG_INVALID;
+	tlbe_i[1].flags |= TLB_FLAG_INVALID;
 }
 
 // Page Address Translation
@@ -762,71 +847,60 @@ static u32 TranslatePageAddress(const u32 _Address, const XCheckTLBFlag _Flag)
 	u32 VSID = SR_VSID(sr);                  // 24 bit
 	u32 api = EA_API(_Address);              //  6 bit (part of page_index)
 
-	u8* pRAM = GetPointer(0);
+	// Direct access to the fastmem Arena
+	// FIXME: is this the best idea for clean code?
+	u8* base_mem = Memory::base;
 
 	// hash function no 1 "xor" .360
-	u32 hash1 = (VSID ^ page_index);
-	u32 pteg_addr = ((hash1 & PowerPC::ppcState.pagetable_hashmask) << 6) | PowerPC::ppcState.pagetable_base;
+	u32 hash = (VSID ^ page_index);
 
-	// hash1
-	for (int i = 0; i < 8; i++)
+	for (int hash_func = 0; hash_func < 2; hash_func++)
 	{
-		UPTE1 PTE1;
-		PTE1.Hex = bswap(*(u32*)&pRAM[pteg_addr]);
-
-		if (PTE1.V && !PTE1.H)
+		if (hash_func == 1)
 		{
-			if (VSID == PTE1.VSID && (api == PTE1.API))
-			{
-				UPTE2 PTE2;
-				PTE2.Hex = bswap((*(u32*)&pRAM[(pteg_addr + 4)]));
-
-				UpdateTLBEntry(_Flag, PTE2, _Address);
-
-				// set the access bits
-				switch (_Flag)
-				{
-				case FLAG_READ:     PTE2.R = 1; break;
-				case FLAG_WRITE:    PTE2.C = 1; break;
-				case FLAG_NO_EXCEPTION: break;
-				case FLAG_OPCODE: break;
-				}
-				*(u32*)&pRAM[(pteg_addr + 4)] = bswap(PTE2.Hex);
-
-				return ((PTE2.RPN << 12) | offset);
-			}
+			// hash function no 2 "not" .360
+			hash = ~hash;
 		}
-		pteg_addr+=8;
-	}
 
-	// hash function no 2 "not" .360
-	hash1 = ~hash1;
-	pteg_addr = ((hash1 & PowerPC::ppcState.pagetable_hashmask) << 6) | PowerPC::ppcState.pagetable_base;
-	for (int i = 0; i < 8; i++)
-	{
-		u32 pte = bswap(*(u32*)&pRAM[pteg_addr]);
-		if ((pte & PTE1_V) && (pte & PTE1_H))
+		u32 pteg_addr = ((hash & PowerPC::ppcState.pagetable_hashmask) << 6) | PowerPC::ppcState.pagetable_base;
+
+		if ((pteg_addr >> 28) == 1)
+			base_mem = Memory::m_pEXRAM;
+
+		for (int i = 0; i < 8; i++)
 		{
-			if (VSID == PTE1_VSID(pte) && (api == PTE1_API(pte)))
+			u32 pte = bswap(*(u32*)&base_mem[pteg_addr]);
+			bool pteh = (pte & PTE1_H) == 0;
+
+			if (hash_func == 1)
+				pteh = !pteh;
+
+			if ((pte & PTE1_V) && pteh)
 			{
-				UPTE2 PTE2;
-				PTE2.Hex = bswap((*(u32*)&pRAM[(pteg_addr + 4)]));
-
-				UpdateTLBEntry(_Flag, PTE2, _Address);
-
-				switch (_Flag)
+				if (VSID == PTE1_VSID(pte) && (api == PTE1_API(pte)))
 				{
-				case FLAG_READ:     PTE2.R = 1; break;
-				case FLAG_WRITE:    PTE2.C = 1; break;
-				case FLAG_NO_EXCEPTION: break;
-				case FLAG_OPCODE: break;
-				}
-				*(u32*)&pRAM[(pteg_addr + 4)] = bswap(PTE2.Hex);
+					UPTE2 PTE2;
+					PTE2.Hex = bswap((*(u32*)&base_mem[(pteg_addr + 4)]));
 
-				return ((PTE2.RPN << 12) | offset);
+					// set the access bits
+					switch (_Flag)
+					{
+					case FLAG_NO_EXCEPTION: break;
+					case FLAG_READ:     PTE2.R = 1; break;
+					case FLAG_WRITE:    PTE2.R = 1; PTE2.C = 1; break;
+					case FLAG_OPCODE:   PTE2.R = 1; break;
+					}
+
+					if (_Flag != FLAG_NO_EXCEPTION)
+						*(u32*)&base_mem[(pteg_addr + 4)] = bswap(PTE2.Hex);
+
+					UpdateTLBEntry(_Flag, PTE2, _Address);
+
+					return (PTE2.RPN << 12) | offset;
+				}
 			}
+			pteg_addr += 8;
 		}
-		pteg_addr+=8;
 	}
 	return 0;
 }
@@ -841,63 +915,53 @@ static u32 TranslatePageAddress(const u32 _Address, const XCheckTLBFlag _Flag)
 #define BAT_EA_11(v)     ((v)&0x0ffe0000)
 #define BAT_EA_4(v)      ((v)&0xf0000000)
 
+static inline bool CheckAddrBats(const u32 addr, u32* result, u32 batu, u32 spr)
+{
+	for (int i = 0; i < 4; i++)
+	{
+		u32 bl17 = ~(BATU_BL(PowerPC::ppcState.spr[spr + i * 2]) << 17);
+		u32 addr2 = addr & (bl17 | 0xf001ffff);
+
+		if (BATU_BEPI(addr2) == BATU_BEPI(PowerPC::ppcState.spr[spr + i * 2]))
+		{
+			// bat applies to this address
+			if (PowerPC::ppcState.spr[spr + i * 2] & batu)
+			{
+				// bat entry valid
+				u32 offset = BAT_EA_OFFSET(addr);
+				u32 page = BAT_EA_11(addr);
+				page &= ~bl17;
+				page |= BATL_BRPN(PowerPC::ppcState.spr[spr + 1 + i * 2]);
+				// fixme: check access rights
+				*result = page | offset;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // Block Address Translation
 static u32 TranslateBlockAddress(const u32 addr, const XCheckTLBFlag _Flag)
 {
 	u32 result = 0;
 	UReg_MSR& m_MSR = ((UReg_MSR&)PowerPC::ppcState.msr);
+	u32 batu = (m_MSR.PR ? BATU_Vp : BATU_Vs);
 
 	// Check for enhanced mode (secondary BAT enable) using 8 BATs
-	int bats = (Core::g_CoreStartupParameter.bWii && HID4.SBE)?8:4;
+	bool enhanced_bats = SConfig::GetInstance().m_LocalCoreStartupParameter.bWii && HID4.SBE;
 
-	for (int i = 0; i < bats; i++)
+	if (_Flag != FLAG_OPCODE)
 	{
-		if (_Flag != FLAG_OPCODE)
-		{
-			u32 bl17 = ~(BATU_BL(PowerPC::ppcState.spr[SPR_DBAT0U + i * 2]) << 17);
-			u32 addr2 = addr & (bl17 | 0xf001ffff);
-			u32 batu = (m_MSR.PR ? BATU_Vp : BATU_Vs);
-
-			if (BATU_BEPI(addr2) == BATU_BEPI(PowerPC::ppcState.spr[SPR_DBAT0U + i * 2]))
-			{
-				// bat applies to this address
-				if (PowerPC::ppcState.spr[SPR_DBAT0U + i * 2] & batu)
-				{
-					// bat entry valid
-					u32 offset = BAT_EA_OFFSET(addr);
-					u32 page = BAT_EA_11(addr);
-					page &= ~bl17;
-					page |= BATL_BRPN(PowerPC::ppcState.spr[SPR_DBAT0L + i * 2]);
-					// fixme: check access rights
-					result = page | offset;
-					return result;
-				}
-			}
-		}
-		else
-		{
-			u32 bl17 = ~(BATU_BL(PowerPC::ppcState.spr[SPR_IBAT0U + i * 2]) << 17);
-			u32 addr2 = addr & (bl17 | 0xf001ffff);
-			u32 batu = (m_MSR.PR ? BATU_Vp : BATU_Vs);
-
-			if (BATU_BEPI(addr2) == BATU_BEPI(PowerPC::ppcState.spr[SPR_IBAT0U + i * 2]))
-			{
-				// bat applies to this address
-				if (PowerPC::ppcState.spr[SPR_IBAT0U + i * 2] & batu)
-				{
-					// bat entry valid
-					u32 offset = BAT_EA_OFFSET(addr);
-					u32 page = BAT_EA_11(addr);
-					page &= ~bl17;
-					page |= BATL_BRPN(PowerPC::ppcState.spr[SPR_IBAT0L + i * 2]);
-					// fixme: check access rights
-					result = page | offset;
-					return result;
-				}
-			}
-		}
+		if (!CheckAddrBats(addr, &result, batu, SPR_DBAT0U) && enhanced_bats)
+			CheckAddrBats(addr, &result, batu, SPR_DBAT4U);
 	}
-	return 0;
+	else
+	{
+		if (!CheckAddrBats(addr, &result, batu, SPR_IBAT0U) && enhanced_bats)
+			CheckAddrBats(addr, &result, batu, SPR_IBAT4U);
+	}
+	return result;
 }
 
 // Translate effective address using BAT or PAT.  Returns 0 if the address cannot be translated.
@@ -909,20 +973,14 @@ u32 TranslateAddress(const u32 _Address, const XCheckTLBFlag _Flag)
 	// Check MSR[DR] bit before translating data addresses
 	//if (((_Flag == FLAG_READ) || (_Flag == FLAG_WRITE)) && !(MSR & (1 << (31 - 27)))) return _Address;
 
-	u32 tlb_addr = TranslateBlockAddress(_Address, _Flag);
-	if (tlb_addr == 0)
+	// Technically we should do this, but almost no games, even heavy MMU ones, use any custom BATs whatsoever,
+	// so only do it where it's really needed.
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bBAT)
 	{
-		tlb_addr = TranslatePageAddress(_Address, _Flag);
-		if (tlb_addr != 0)
-		{
+		u32 tlb_addr = TranslateBlockAddress(_Address, _Flag);
+		if (tlb_addr)
 			return tlb_addr;
-		}
 	}
-	else
-	{
-		return tlb_addr;
-	}
-
-	return 0;
+	return TranslatePageAddress(_Address, _Flag);
 }
 } // namespace

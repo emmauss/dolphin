@@ -4,7 +4,7 @@
 
 #include "Common/Atomic.h"
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FPURoundMode.h"
 #include "Common/MathUtil.h"
 
@@ -35,6 +35,7 @@ static volatile CPUState state = CPU_POWERDOWN;
 Interpreter * const interpreter = Interpreter::getInstance();
 static CoreMode mode;
 
+Watches watches;
 BreakPoints breakpoints;
 MemChecks memchecks;
 PPCDebugInterface debug_interface;
@@ -117,15 +118,22 @@ void Init(int cpu_core)
 	FPURoundMode::SetPrecisionMode(FPURoundMode::PREC_53);
 
 	memset(ppcState.sr, 0, sizeof(ppcState.sr));
-	ppcState.DebugCount = 0;
-	ppcState.dtlb_last = 0;
-	memset(ppcState.dtlb_va, 0, sizeof(ppcState.dtlb_va));
-	memset(ppcState.dtlb_pa, 0, sizeof(ppcState.dtlb_pa));
-	ppcState.itlb_last = 0;
-	memset(ppcState.itlb_va, 0, sizeof(ppcState.itlb_va));
-	memset(ppcState.itlb_pa, 0, sizeof(ppcState.itlb_pa));
 	ppcState.pagetable_base = 0;
 	ppcState.pagetable_hashmask = 0;
+
+	for (int tlb = 0; tlb < 2; tlb++)
+	{
+		for (int set = 0; set < 64; set++)
+		{
+			for (int way = 0; way < 2; way++)
+			{
+				ppcState.tlb[tlb][set][way].flags = TLB_FLAG_INVALID;
+				ppcState.tlb[tlb][set][way].paddr = 0;
+				ppcState.tlb[tlb][set][way].pte = 0;
+				ppcState.tlb[tlb][set][way].tag = 0;
+			}
+		}
+	}
 
 	ResetRegisters();
 	PPCTables::InitTables(cpu_core);
@@ -162,6 +170,9 @@ void Init(int cpu_core)
 	state = CPU_STEPPING;
 
 	ppcState.iCache.Init();
+
+	if (SConfig::GetInstance().m_LocalCoreStartupParameter.bEnableDebugging)
+		breakpoints.ClearAllTemporary();
 }
 
 void Shutdown()
@@ -300,10 +311,6 @@ void UpdatePerformanceMonitor(u32 cycles, u32 num_load_stores, u32 num_fp_inst)
 
 void CheckExceptions()
 {
-	// Make sure we are checking against the latest EXI status. This is required
-	// for devices which interrupt frequently, such as the gc mic
-	ExpansionInterface::UpdateInterrupts();
-
 	// Read volatile data once
 	u32 exceptions = ppcState.Exceptions;
 
@@ -447,7 +454,7 @@ void CheckExternalExceptions()
 	u32 exceptions = ppcState.Exceptions;
 
 	// EXTERNAL INTERRUPT
-	if (MSR & 0x0008000) //hacky...the exception shouldn't be generated if EE isn't set...
+	if (exceptions && (MSR & 0x0008000))  // Handling is delayed until MSR.EE=1.
 	{
 		if (exceptions & EXCEPTION_EXTERNAL_INT)
 		{

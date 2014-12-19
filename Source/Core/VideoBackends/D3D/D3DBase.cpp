@@ -4,8 +4,8 @@
 
 #include "Common/StringUtil.h"
 #include "VideoBackends/D3D/D3DBase.h"
+#include "VideoBackends/D3D/D3DState.h"
 #include "VideoBackends/D3D/D3DTexture.h"
-#include "VideoBackends/D3D/GfxState.h"
 #include "VideoCommon/VideoConfig.h"
 
 namespace DX11
@@ -177,7 +177,8 @@ std::vector<DXGI_SAMPLE_DESC> EnumAAModes(IDXGIAdapter* adapter)
 		{
 			UINT quality_levels = 0;
 			device->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM, samples, &quality_levels);
-			if (quality_levels > 0) {
+			if (quality_levels > 0)
+			{
 				DXGI_SAMPLE_DESC desc;
 				desc.Count = samples;
 				for (desc.Quality = 0; desc.Quality < quality_levels; ++desc.Quality)

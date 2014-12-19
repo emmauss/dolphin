@@ -4,10 +4,6 @@
 
 #include <cmath>
 #include <cstdio>
-#include <locale.h>
-#ifdef __APPLE__
-	#include <xlocale.h>
-#endif
 
 #include "Common/MathUtil.h"
 #include "VideoCommon/BPMemory.h"
@@ -70,7 +66,7 @@ static void WriteSwizzler(char*& p, u32 format, API_TYPE ApiType)
 	if (ApiType == API_OPENGL)
 	{
 		WRITE(p, "#define samp0 samp9\n");
-		WRITE(p, "SAMPLER_BINDING(9) uniform sampler2D samp0;\n");
+		WRITE(p, "SAMPLER_BINDING(9) uniform sampler2DArray samp0;\n");
 
 		WRITE(p, "  out vec4 ocol0;\n");
 		WRITE(p, "void main()\n");
@@ -91,8 +87,8 @@ static void WriteSwizzler(char*& p, u32 format, API_TYPE ApiType)
 
 	WRITE(p, "  int y_block_position = uv1.y & %d;\n", ~(blkH - 1));
 	WRITE(p, "  int y_offset_in_block = uv1.y & %d;\n", blkH - 1);
-	WRITE(p, "  int x_virtual_position = (uv1.x << %d) + y_offset_in_block * position.z;\n", Log2(samples));
-	WRITE(p, "  int x_block_position = (x_virtual_position >> %d) & %d;\n", Log2(blkH), ~(blkW - 1));
+	WRITE(p, "  int x_virtual_position = (uv1.x << %d) + y_offset_in_block * position.z;\n", IntLog2(samples));
+	WRITE(p, "  int x_block_position = (x_virtual_position >> %d) & %d;\n", IntLog2(blkH), ~(blkW - 1));
 	if (samples == 1)
 	{
 		// 32 bit textures (RGBA8 and Z24) are stored in 2 cache line increments
@@ -100,7 +96,7 @@ static void WriteSwizzler(char*& p, u32 format, API_TYPE ApiType)
 		WRITE(p, "  x_virtual_position = x_virtual_position << 1;\n");
 	}
 	WRITE(p, "  int x_offset_in_block = x_virtual_position & %d;\n", blkW - 1);
-	WRITE(p, "  int y_offset = (x_virtual_position >> %d) & %d;\n", Log2(blkW), blkH - 1);
+	WRITE(p, "  int y_offset = (x_virtual_position >> %d) & %d;\n", IntLog2(blkW), blkH - 1);
 
 	WRITE(p, "  sampleUv.x = x_offset_in_block + x_block_position;\n");
 	WRITE(p, "  sampleUv.y = y_block_position + y_offset;\n");
@@ -120,7 +116,7 @@ static void WriteSwizzler(char*& p, u32 format, API_TYPE ApiType)
 
 static void WriteSampleColor(char*& p, const char* colorComp, const char* dest, int xoffset, API_TYPE ApiType)
 {
-	WRITE(p, "  %s = texture(samp0, uv0 + float2(%d, 0) * sample_offset).%s;\n",
+	WRITE(p, "  %s = texture(samp0, float3(uv0 + float2(%d, 0) * sample_offset, 0.0)).%s;\n",
 		dest, xoffset, colorComp
 	);
 }
@@ -579,10 +575,6 @@ static void WriteZ24Encoder(char*& p, API_TYPE ApiType)
 
 const char *GenerateEncodingShader(u32 format,API_TYPE ApiType)
 {
-#ifndef ANDROID
-	locale_t locale = newlocale(LC_NUMERIC_MASK, "C", nullptr); // New locale for compilation
-	locale_t old_locale = uselocale(locale); // Apply the locale for this thread
-#endif
 	text[sizeof(text) - 1] = 0x7C;  // canary
 
 	char *p = text;
@@ -666,10 +658,6 @@ const char *GenerateEncodingShader(u32 format,API_TYPE ApiType)
 	if (text[sizeof(text) - 1] != 0x7C)
 		PanicAlert("TextureConversionShader generator - buffer too small, canary has been eaten!");
 
-#ifndef ANDROID
-	uselocale(old_locale); // restore locale
-	freelocale(locale);
-#endif
 	return text;
 }
 

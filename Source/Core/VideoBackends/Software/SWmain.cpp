@@ -5,7 +5,7 @@
 #include <string>
 
 #include "Common/Atomic.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/StringUtil.h"
 #include "Common/Logging/LogManager.h"
@@ -33,6 +33,7 @@
 #include "VideoBackends/Software/VideoBackend.h"
 #include "VideoBackends/Software/XFMemLoader.h"
 
+#include "VideoCommon/BoundingBox.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/PixelEngine.h"
@@ -71,7 +72,7 @@ void VideoSoftware::ShowConfig(void *hParent)
 	Host_ShowVideoConfig(hParent, GetDisplayName(), "gfx_software");
 }
 
-bool VideoSoftware::Initialize(void *&window_handle)
+bool VideoSoftware::Initialize(void *window_handle)
 {
 	g_SWVideoConfig.Load((File::GetUserPath(D_CONFIG_IDX) + "gfx_software.ini").c_str());
 
@@ -116,14 +117,7 @@ void VideoSoftware::DoState(PointerWrap& p)
 	p.DoPOD(swstats);
 
 	// CP Memory
-	p.DoArray(arraybases, 16);
-	p.DoArray(arraystrides, 16);
-	p.Do(MatrixIndexA);
-	p.Do(MatrixIndexB);
-	p.Do(g_VtxDesc.Hex);
-	p.DoArray(g_VtxAttr, 8);
-	p.DoMarker("CP Memory");
-
+	DoCPState(p);
 }
 
 void VideoSoftware::CheckInvalidState()
@@ -201,8 +195,11 @@ void VideoSoftware::Video_Prepare()
 }
 
 // Run from the CPU thread (from VideoInterface.cpp)
-void VideoSoftware::Video_BeginField(u32 xfbAddr, u32 fbWidth, u32 fbHeight)
+void VideoSoftware::Video_BeginField(u32 xfbAddr, u32 fbWidth, u32 fbStride, u32 fbHeight)
 {
+	// XXX: fbStride should be implemented properly here
+	// If stride isn't implemented then there are problems with XFB
+	// Animal Crossing is a good example for this.
 	s_beginFieldArgs.xfbAddr = xfbAddr;
 	s_beginFieldArgs.fbWidth = fbWidth;
 	s_beginFieldArgs.fbHeight = fbHeight;
@@ -287,6 +284,11 @@ u32 VideoSoftware::Video_GetQueryResult(PerfQueryType type)
 	return EfbInterface::perf_values[type];
 }
 
+u16 VideoSoftware::Video_GetBoundingBox(int index)
+{
+	return BoundingBox::coords[index];
+}
+
 bool VideoSoftware::Video_Screenshot(const std::string& filename)
 {
 	SWRenderer::SetScreenshot(filename.c_str());
@@ -356,7 +358,7 @@ void VideoSoftware::Video_GatherPipeBursted()
 	SWCommandProcessor::GatherPipeBursted();
 }
 
-bool VideoSoftware::Video_IsPossibleWaitingSetDrawDone(void)
+bool VideoSoftware::Video_IsPossibleWaitingSetDrawDone()
 {
 	return false;
 }
@@ -370,12 +372,6 @@ void VideoSoftware::RegisterCPMMIO(MMIO::Mapping* mmio, u32 base)
 unsigned int VideoSoftware::PeekMessages()
 {
 	return GLInterface->PeekMessages();
-}
-
-// Show the current FPS
-void VideoSoftware::UpdateFPSDisplay(const std::string& text)
-{
-	GLInterface->UpdateFPSDisplay(StringFromFormat("%s | Software | %s", scm_rev_str, text.c_str()));
 }
 
 }

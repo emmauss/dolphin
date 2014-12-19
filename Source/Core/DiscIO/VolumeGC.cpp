@@ -3,10 +3,11 @@
 // Refer to the license.txt file included.
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "DiscIO/Blob.h"
 #include "DiscIO/FileMonitor.h"
@@ -21,8 +22,6 @@ CVolumeGC::CVolumeGC(IBlobReader* _pReader)
 
 CVolumeGC::~CVolumeGC()
 {
-	delete m_pReader;
-	m_pReader = nullptr; // I don't think this makes any difference, but anyway
 }
 
 bool CVolumeGC::Read(u64 _Offset, u64 _Length, u8* _pBuffer) const
@@ -93,11 +92,11 @@ int CVolumeGC::GetRevision() const
 	if (!m_pReader)
 		return 0;
 
-	u8 Revision;
-	if (!Read(7, 1, &Revision))
+	u8 revision;
+	if (!Read(7, 1, &revision))
 		return 0;
 
-	return Revision;
+	return revision;
 }
 
 std::vector<std::string> CVolumeGC::GetNames() const
@@ -157,12 +156,12 @@ u64 CVolumeGC::GetRawSize() const
 
 bool CVolumeGC::IsDiscTwo() const
 {
-	bool discTwo;
+	bool discTwo = false;
 	Read(6,1, (u8*) &discTwo);
 	return discTwo;
 }
 
-auto CVolumeGC::GetStringDecoder(ECountry country) -> StringDecoder
+CVolumeGC::StringDecoder CVolumeGC::GetStringDecoder(ECountry country)
 {
 	return (COUNTRY_JAPAN == country || COUNTRY_TAIWAN == country) ?
 		SHIFTJISToUTF8 : CP1252ToUTF8;

@@ -89,6 +89,10 @@ static const char* cmpname[4] = {
 	"cmpw", "cmpd", "cmplw", "cmpld"
 };
 
+static const char* ps_cmpname[4] = {
+	"ps_cmpu0", "ps_cmpo0", "ps_cmpu1", "ps_cmpo1"
+};
+
 static const char* b_ext[4] = {
 	"", "l", "a", "la"
 };
@@ -352,16 +356,18 @@ void GekkoDisassembler::trapi(u32 in, unsigned char dmode)
 {
 	const char* cnd = trap_condition[PPCGETD(in)];
 
+
+	m_flags |= dmode;
 	if (cnd != nullptr)
 	{
-		m_flags |= dmode;
 		m_opcode = StringFromFormat("t%c%s", dmode ? 'd' : 'w', cnd);
-		m_operands = imm(in, 0, 2, false);
 	}
 	else
 	{
-		ill(in);
+		m_opcode = StringFromFormat("t%ci", dmode ? 'd' : 'w');
+		m_operands = StringFromFormat("%d, ", PPCGETD(in));
 	}
+	m_operands += imm(in, 0, 2, false);
 }
 
 
@@ -379,7 +385,7 @@ void GekkoDisassembler::cmpi(u32 in, int uimm)
 		i = (int)PPCGETCRD(in);
 		if (i != 0)
 		{
-			m_operands += StringFromFormat("cr%c,", '0' + i);
+			m_operands += StringFromFormat("cr%c, ", '0' + i);
 		}
 
 		m_operands += imm(in, uimm, 2, false);
@@ -971,14 +977,24 @@ void GekkoDisassembler::mtfsb(u32 in, int n)
 #define TBR ((inst >> 11) & 0x3ff)
 #define CRM ((inst >> 12) & 0xff)
 
+#define I ((inst >> 12) & 0x7)
+#define W ((inst >> 15) & 0x1)
+#define IX ((inst >> 7) & 0x7)
+#define WX ((inst >> 10) & 0x1)
+
 
 void GekkoDisassembler::ps(u32 inst)
 {
 	switch ((inst >> 1) & 0x1F)
 	{
 	case 6:
-		m_opcode = "ps_lux";
-		m_operands = StringFromFormat("p%u, (r%u + r%u)", FD, RA, RB);
+		m_opcode = inst & 0x40 ? "psq_lux" : "psq_lx";
+		m_operands = StringFromFormat("p%u, (r%u + r%u), %d, qr%d", FD, RA, RB, WX, IX);
+		return;
+
+	case 7:
+		m_opcode = inst & 0x40 ? "psq_stux" : "psq_stx";
+		m_operands = StringFromFormat("(r%u + r%u), p%u, %d, qr%d", RA, RB, FS, WX, IX);
 		return;
 
 	case 18:
@@ -1091,25 +1107,18 @@ void GekkoDisassembler::ps(u32 inst)
 		return;
 
 	case 0:
-		m_opcode = "ps_cmpu0";
-		m_operands = "ps_cmpu0";
-		return;
-
 	case 32:
-		m_opcode = "ps_cmpq0";
-		m_operands = "ps_cmpo0";
-		return;
-
 	case 64:
-		m_opcode = "ps_cmpu1";
-		m_operands = "ps_cmpu1";
-		return;
-
 	case 96:
-		m_opcode = "ps_cmpo1";
-		m_operands = "ps_cmpo1";
-		return;
+	{
+		m_opcode = ps_cmpname[(inst >> 6) & 0x3];
 
+		int i = (int)PPCGETCRD(inst);
+		if (i != 0)
+			m_operands += StringFromFormat("cr%c, ", '0' + i);
+		m_operands += StringFromFormat("p%u, p%u", FA, FB);
+		return;
+	}
 	case 528:
 		m_opcode = "ps_merge00";
 		m_operands = StringFromFormat("p%u, p%u[0],p%u[0]", FD, FA, FB);
@@ -1131,9 +1140,10 @@ void GekkoDisassembler::ps(u32 inst)
 		return;
 
 	case 1014:
-		m_opcode = "dcbz_l";
-		m_operands = "";
-		return;
+		if (inst & PPCDMASK)
+			ill(inst);
+		else
+			dab(inst, "dcbz_l", 3, 0, 0, 0, 0);
 	}
 
 	//	default:
@@ -1147,22 +1157,22 @@ void GekkoDisassembler::ps_mem(u32 inst)
 	{
 	case 56:
 		m_opcode = "psq_l";
-		m_operands = StringFromFormat("p%u, %i(r%u)", RS, SEX12(inst & 0xFFF), RA);
+		m_operands = StringFromFormat("p%u, %i(r%u), %d, qr%d", RS, SEX12(inst & 0xFFF), RA, W, I);
 		break;
 
 	case 57:
 		m_opcode = "psq_lu";
-		m_operands = "";
+		m_operands = StringFromFormat("p%u, %i(r%u), %d, qr%d", RS, SEX12(inst & 0xFFF), RA, W, I);;
 		break;
 
 	case 60:
 		m_opcode = "psq_st";
-		m_operands = StringFromFormat("%i(r%u), p%u", SEX12(inst & 0xFFF), RA, RS);
+		m_operands = StringFromFormat("%i(r%u), p%u, %d, qr%d", SEX12(inst & 0xFFF), RA, RS, W, I);
 		break;
 
 	case 61:
 		m_opcode = "psq_stu";
-		m_operands = StringFromFormat("r%u, p%u ?", RA, RS);
+		m_operands = StringFromFormat("%i(r%u), p%u, %d, qr%d", SEX12(inst & 0xFFF), RA, RS, W, I);
 		break;
 	}
 }
@@ -2037,11 +2047,11 @@ u32* GekkoDisassembler::DoDisassembly(bool big_endian)
 			break;
 
 		case 44:
-			fdabc(in, "sqrts", 2, 0);
+			fdabc(in, "sqrts", 1, 0);
 			break;
 
 		case 48:
-			fdabc(in, "res", 2, 0);
+			fdabc(in, "res", 1, 0);
 			break;
 
 		case 50:
@@ -2103,7 +2113,7 @@ u32* GekkoDisassembler::DoDisassembly(bool big_endian)
 				break;
 
 			case 12:
-				fdabc(in, "sqrt", 2, 0);
+				fdabc(in, "sqrt", 1, 0);
 				break;
 
 			case 14:
@@ -2132,10 +2142,6 @@ u32* GekkoDisassembler::DoDisassembly(bool big_endian)
 
 			case 30:
 				fdabc(in, "nmadd", 7, 0);
-				break;
-
-			case 52:
-				m_opcode = "XXX dp 52";
 				break;
 
 			default:
@@ -2279,7 +2285,7 @@ const char* GekkoDisassembler::GetGPRName(u32 index)
 	if (index < 32)
 		return gprnames[index];
 
-	return 0;
+	return nullptr;
 }
 
 static const char* fprnames[] =
@@ -2295,5 +2301,5 @@ const char* GekkoDisassembler::GetFPRName(u32 index)
 	if (index < 32)
 		return fprnames[index];
 
-	return 0;
+	return nullptr;
 }

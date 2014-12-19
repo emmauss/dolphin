@@ -47,7 +47,7 @@ static GekkoOPTemplate primarytable[] =
 
 	{7,  &JitArm::arith},                 //"mulli",    OPTYPE_INTEGER, FL_OUT_D | FL_IN_A | FL_RC_BIT, 2}},
 	{8,  &JitArm::subfic},                //"subfic",   OPTYPE_INTEGER, FL_OUT_D | FL_IN_A | FL_SET_CA}},
-	{10, &JitArm::FallBackToInterpreter}, //"cmpli",    OPTYPE_INTEGER, FL_IN_A | FL_SET_CRn}},
+	{10, &JitArm::cmpli},                 //"cmpli",    OPTYPE_INTEGER, FL_IN_A | FL_SET_CRn}},
 	{11, &JitArm::cmpi},                  //"cmpi",     OPTYPE_INTEGER, FL_IN_A | FL_SET_CRn}},
 	{12, &JitArm::arith},                 //"addic",    OPTYPE_INTEGER, FL_OUT_D | FL_IN_A | FL_SET_CA}},
 	{13, &JitArm::arith},                 //"addic_rc", OPTYPE_INTEGER, FL_OUT_D | FL_IN_A | FL_SET_CR0}},
@@ -89,7 +89,7 @@ static GekkoOPTemplate primarytable[] =
 	{50, &JitArm::lfXX},                  //"lfd",  OPTYPE_LOADFP, FL_IN_A}},
 	{51, &JitArm::lfXX},                  //"lfdu", OPTYPE_LOADFP, FL_OUT_A | FL_IN_A}},
 
-	{52, &JitArm::stfs},                  //"stfs",  OPTYPE_STOREFP, FL_IN_A}},
+	{52, &JitArm::stfXX},                 //"stfs",  OPTYPE_STOREFP, FL_IN_A}},
 	{53, &JitArm::stfXX},                 //"stfsu", OPTYPE_STOREFP, FL_OUT_A | FL_IN_A}},
 	{54, &JitArm::stfXX},                 //"stfd",  OPTYPE_STOREFP, FL_IN_A}},
 	{55, &JitArm::stfXX},                 //"stfdu", OPTYPE_STOREFP, FL_OUT_A | FL_IN_A}},
@@ -190,7 +190,7 @@ static GekkoOPTemplate table31[] =
 	{476, &JitArm::arith},                  //"nandx",  OPTYPE_INTEGER, FL_OUT_A | FL_IN_SB | FL_RC_BIT}},
 	{284, &JitArm::arith},                  //"eqvx",   OPTYPE_INTEGER, FL_OUT_A | FL_IN_SB | FL_RC_BIT}},
 	{0,   &JitArm::cmp},                    //"cmp",    OPTYPE_INTEGER, FL_IN_AB | FL_SET_CRn}},
-	{32,  &JitArm::FallBackToInterpreter},  //"cmpl",   OPTYPE_INTEGER, FL_IN_AB | FL_SET_CRn}},
+	{32,  &JitArm::cmpl},                   //"cmpl",   OPTYPE_INTEGER, FL_IN_AB | FL_SET_CRn}},
 	{26,  &JitArm::cntlzwx},                //"cntlzwx",OPTYPE_INTEGER, FL_OUT_A | FL_IN_S | FL_RC_BIT}},
 	{922, &JitArm::extshx},                 //"extshx", OPTYPE_INTEGER, FL_OUT_A | FL_IN_S | FL_RC_BIT}},
 	{954, &JitArm::extsbx},                 //"extsbx", OPTYPE_INTEGER, FL_OUT_A | FL_IN_S | FL_RC_BIT}},
@@ -286,10 +286,10 @@ static GekkoOPTemplate table31[] =
 	// Unused instructions on GC
 	{310, &JitArm::FallBackToInterpreter},  //"eciwx",   OPTYPE_INTEGER, FL_RC_BIT}},
 	{438, &JitArm::FallBackToInterpreter},  //"ecowx",   OPTYPE_INTEGER, FL_RC_BIT}},
-	{854, &JitArm::FallBackToInterpreter},  //"eieio",   OPTYPE_INTEGER, FL_RC_BIT}},
+	{854, &JitArm::DoNothing},              //"eieio",   OPTYPE_INTEGER, FL_RC_BIT}},
 	{306, &JitArm::FallBackToInterpreter},  //"tlbie",   OPTYPE_SYSTEM, 0}},
 	{370, &JitArm::FallBackToInterpreter},  //"tlbia",   OPTYPE_SYSTEM, 0}},
-	{566, &JitArm::FallBackToInterpreter},  //"tlbsync", OPTYPE_SYSTEM, 0}},
+	{566, &JitArm::DoNothing},              //"tlbsync", OPTYPE_SYSTEM, 0}},
 };
 
 static GekkoOPTemplate table31_2[] =
@@ -378,9 +378,12 @@ void CompileInstruction(PPCAnalyst::CodeOp & op)
 	JitArm *jitarm = (JitArm *)jit;
 	(jitarm->*dynaOpTable[op.inst.OPCD])(op.inst);
 	GekkoOPInfo *info = op.opinfo;
-	if (info) {
+
+	if (info)
+	{
 #ifdef OPLOG
-		if (!strcmp(info->opname, OP_TO_LOG)){  ///"mcrfs"
+		if (!strcmp(info->opname, OP_TO_LOG)) // "mcrfs"
+		{
 			rsplocations.push_back(jit.js.compilerPC);
 		}
 #endif

@@ -30,18 +30,13 @@
 #include "Core/PowerPC/PPCTables.h"
 #include "Core/PowerPC/Jit64/JitAsm.h"
 #include "Core/PowerPC/JitCommon/Jit_Util.h"
-#include "Core/PowerPC/JitCommon/JitBackpatch.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/JitCommon/JitCache.h"
 #include "Core/PowerPC/JitILCommon/IR.h"
 #include "Core/PowerPC/JitILCommon/JitILBase.h"
 
-class JitIL : public JitILBase, public EmuCodeBlock
+class JitIL : public JitILBase
 {
-private:
-	JitBlockCache blocks;
-	TrampolineCache trampolines;
-
 public:
 	Jit64AsmRoutineManager asm_routines;
 
@@ -51,6 +46,9 @@ public:
 	// Initialization, etc
 
 	void Init() override;
+
+	void EnableBlockLink();
+
 	void Shutdown() override;
 
 	// Jit!
@@ -62,24 +60,23 @@ public:
 
 	JitBlockCache *GetBlockCache() override { return &blocks; }
 
-	const u8 *BackPatch(u8 *codePtr, u32 em_address, void *ctx) override { return nullptr; };
-
-	bool IsInCodeSpace(u8 *ptr) override { return IsInSpace(ptr); }
-
 	void ClearCache() override;
-	const u8 *GetDispatcher() {
+	const u8 *GetDispatcher()
+	{
 		return asm_routines.dispatcher;  // asm_routines.dispatcher
 	}
-	const CommonAsmRoutines *GetAsmRoutines() override {
+
+	const CommonAsmRoutines *GetAsmRoutines() override
+	{
 		return &asm_routines;
 	}
 
-	const char *GetName() override {
+	const char *GetName() override
+	{
 		return "JIT64IL";
 	}
 
 	// Run!
-
 	void Run() override;
 	void SingleStep() override;
 
@@ -112,4 +109,5 @@ public:
 	void DynaRunTable31(UGeckoInstruction _inst) override;
 	void DynaRunTable59(UGeckoInstruction _inst) override;
 	void DynaRunTable63(UGeckoInstruction _inst) override;
+
 };

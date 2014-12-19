@@ -9,12 +9,12 @@ set(SRCS	ActionReplay.cpp
 			ec_wii.cpp
 			GeckoCodeConfig.cpp
 			GeckoCode.cpp
+			MemTools.cpp
 			Movie.cpp
 			NetPlayClient.cpp
 			NetPlayServer.cpp
 			PatchEngine.cpp
 			State.cpp
-			stdafx.cpp
 			VolumeHandler.cpp
 			Boot/Boot_BS2Emu.cpp
 			Boot/Boot.cpp
@@ -133,6 +133,7 @@ set(SRCS	ActionReplay.cpp
 			HW/WiimoteEmu/Encryption.cpp
 			HW/WiimoteEmu/Speaker.cpp
 			HW/WiimoteReal/WiimoteReal.cpp
+			HW/WiiSaveCrypted.cpp
 			IPC_HLE/ICMPLin.cpp
 			IPC_HLE/WII_IPC_HLE.cpp
 			IPC_HLE/WII_IPC_HLE_Device_DI.cpp
@@ -179,7 +180,6 @@ set(SRCS	ActionReplay.cpp
 
 if(_M_X86)
 	set(SRCS ${SRCS}
-			x64MemTools.cpp
 			PowerPC/Jit64IL/IR_X86.cpp
 			PowerPC/Jit64IL/JitIL.cpp
 			PowerPC/Jit64IL/JitIL_Tables.cpp
@@ -195,13 +195,12 @@ if(_M_X86)
 			PowerPC/Jit64/Jit_Paired.cpp
 			PowerPC/Jit64/JitRegCache.cpp
 			PowerPC/Jit64/Jit_SystemRegisters.cpp
-			PowerPC/JitCommon/JitBackpatch.cpp
 			PowerPC/JitCommon/JitAsmCommon.cpp
-			PowerPC/JitCommon/Jit_Util.cpp)
-endif()
-if(_M_ARM_32)
+			PowerPC/JitCommon/JitBackpatch.cpp
+			PowerPC/JitCommon/Jit_Util.cpp
+			PowerPC/JitCommon/TrampolineCache.cpp)
+elseif(_M_ARM_32)
 	set(SRCS ${SRCS}
-			ArmMemTools.cpp
 			PowerPC/JitArm32/Jit.cpp
 			PowerPC/JitArm32/JitAsm.cpp
 			PowerPC/JitArm32/JitArm_BackPatch.cpp
@@ -218,6 +217,17 @@ if(_M_ARM_32)
 			PowerPC/JitArm32/JitArm_SystemRegisters.cpp
 			PowerPC/JitArm32/JitArm_LoadStoreFloating.cpp
 			)
+elseif(_M_ARM_64)
+	set(SRCS ${SRCS}
+	         PowerPC/JitArm64/Jit.cpp
+	         PowerPC/JitArm64/JitAsm.cpp
+	         PowerPC/JitArm64/JitArm64Cache.cpp
+	         PowerPC/JitArm64/JitArm64_RegCache.cpp
+	         PowerPC/JitArm64/JitArm64_Branch.cpp
+	         PowerPC/JitArm64/JitArm64_Integer.cpp
+	         PowerPC/JitArm64/JitArm64_LoadStore.cpp
+	         PowerPC/JitArm64/JitArm64_SystemRegisters.cpp
+	         PowerPC/JitArm64/JitArm64_Tables.cpp)
 endif()
 
 set(LIBS
@@ -228,6 +238,7 @@ set(LIBS
 	inputcommon
 	${LZO}
 	sfml-network
+	sfml-system
 	videoogl
 	videosoftware
 	z
@@ -236,14 +247,14 @@ set(LIBS
 if(LIBUSB_FOUND)
 	# Using shared LibUSB
 	set(LIBS	${LIBS}	${LIBUSB_LIBRARIES})
-	set(SRCS	${SRCS}	IPC_HLE/WII_IPC_HLE_Device_hid.cpp)
+	set(SRCS	${SRCS}	IPC_HLE/WII_IPC_HLE_Device_hid.cpp
+	        	       	HW/SI_GCAdapter.cpp)
 endif(LIBUSB_FOUND)
 
 set(LIBS ${LIBS} ${POLARSSL_LIBRARY})
 
 if(WIN32)
-	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Win32.cpp stdafx.cpp
-		HW/WiimoteReal/IOWin.cpp)
+	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Win32.cpp HW/WiimoteReal/IOWin.cpp)
 elseif(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 	set(SRCS ${SRCS} HW/BBA-TAP/TAP_Apple.cpp HW/WiimoteReal/IOdarwin.mm)
 	set(LIBS ${LIBS}

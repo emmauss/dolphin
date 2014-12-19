@@ -2,8 +2,8 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
 #include "Common/NandPaths.h"
 #include "Common/SettingsHandler.h"
@@ -43,9 +43,9 @@ bool CBoot::EmulatedBS2_GC()
 	// Set up MSR and the BAT SPR registers.
 	UReg_MSR& m_MSR = ((UReg_MSR&)PowerPC::ppcState.msr);
 	m_MSR.FP = 1;
-	PowerPC::ppcState.spr[SPR_IBAT0U] = 0x800001ff;
+	PowerPC::ppcState.spr[SPR_IBAT0U] = 0x80001fff;
 	PowerPC::ppcState.spr[SPR_IBAT0L] = 0x00000002;
-	PowerPC::ppcState.spr[SPR_DBAT0U] = 0x800001ff;
+	PowerPC::ppcState.spr[SPR_DBAT0U] = 0x80001fff;
 	PowerPC::ppcState.spr[SPR_DBAT0L] = 0x00000002;
 	PowerPC::ppcState.spr[SPR_DBAT1U] = 0xc0001fff;
 	PowerPC::ppcState.spr[SPR_DBAT1L] = 0x0000002a;
@@ -156,8 +156,6 @@ bool CBoot::EmulatedBS2_GC()
 	// Load patches
 	PatchEngine::LoadPatches();
 
-	PowerPC::ppcState.DebugCount = 0;
-
 	// If we have any patches that need to be applied very early, here's a good place
 	PatchEngine::ApplyFramePatches();
 
@@ -228,7 +226,7 @@ bool CBoot::SetupWiiMemory(IVolume::ECountry country)
 			return false;
 		}
 		// Write the 256 byte setting.txt to memory.
-		Memory::WriteBigEData(gen.GetData(), 0x3800, SettingsHandler::SETTINGS_SIZE);
+		Memory::CopyToEmu(0x3800, gen.GetData(), SettingsHandler::SETTINGS_SIZE);
 	}
 
 	INFO_LOG(BOOT, "Setup Wii Memory...");
@@ -307,7 +305,7 @@ bool CBoot::EmulatedBS2_Wii()
 {
 	INFO_LOG(BOOT, "Faking Wii BS2...");
 
-	// setup wii memory
+	// setup Wii memory
 	DiscIO::IVolume::ECountry CountryCode = DiscIO::IVolume::COUNTRY_UNKNOWN;
 	if (VolumeHandler::IsValid())
 		CountryCode = VolumeHandler::GetVolume()->GetCountry();
@@ -327,11 +325,11 @@ bool CBoot::EmulatedBS2_Wii()
 		// Set up MSR and the BAT SPR registers.
 		UReg_MSR& m_MSR = ((UReg_MSR&)PowerPC::ppcState.msr);
 		m_MSR.FP = 1;
-		PowerPC::ppcState.spr[SPR_IBAT0U] = 0x800001ff;
+		PowerPC::ppcState.spr[SPR_IBAT0U] = 0x80001fff;
 		PowerPC::ppcState.spr[SPR_IBAT0L] = 0x00000002;
 		PowerPC::ppcState.spr[SPR_IBAT4L] = 0x90001fff;
 		PowerPC::ppcState.spr[SPR_IBAT4L] = 0x10000002;
-		PowerPC::ppcState.spr[SPR_DBAT0U] = 0x800001ff;
+		PowerPC::ppcState.spr[SPR_DBAT0U] = 0x80001fff;
 		PowerPC::ppcState.spr[SPR_DBAT0L] = 0x00000002;
 		PowerPC::ppcState.spr[SPR_DBAT1U] = 0xc0001fff;
 		PowerPC::ppcState.spr[SPR_DBAT1L] = 0x0000002a;
@@ -417,8 +415,6 @@ bool CBoot::EmulatedBS2_Wii()
 		// return
 		PC = PowerPC::ppcState.gpr[3];
 	}
-
-	PowerPC::ppcState.DebugCount = 0;
 
 	return apploaderRan;
 }

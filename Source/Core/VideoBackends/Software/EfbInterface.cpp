@@ -4,7 +4,8 @@
 
 #include <algorithm>
 
-#include "Common/Common.h"
+#include "Common/CommonFuncs.h"
+#include "Common/CommonTypes.h"
 #include "Core/HW/Memmap.h"
 
 #include "VideoBackends/Software/BPMemLoader.h"
@@ -333,57 +334,57 @@ namespace EfbInterface
 		}
 	}
 
-	static void LogicBlend(u32 srcClr, u32 &dstClr, BlendMode::LogicOp op)
+	static void LogicBlend(u32 srcClr, u32* dstClr, BlendMode::LogicOp op)
 	{
 		switch (op)
 		{
 		case BlendMode::CLEAR:
-			dstClr = 0;
+			*dstClr = 0;
 			break;
 		case BlendMode::AND:
-			dstClr = srcClr & dstClr;
+			*dstClr = srcClr & *dstClr;
 			break;
 		case BlendMode::AND_REVERSE:
-			dstClr = srcClr & (~dstClr);
+			*dstClr = srcClr & (~*dstClr);
 			break;
 		case BlendMode::COPY:
-			dstClr = srcClr;
+			*dstClr = srcClr;
 			break;
 		case BlendMode::AND_INVERTED:
-			dstClr = (~srcClr) & dstClr;
+			*dstClr = (~srcClr) & *dstClr;
 			break;
 		case BlendMode::NOOP:
 			// Do nothing
 			break;
 		case BlendMode::XOR:
-			dstClr = srcClr ^ dstClr;
+			*dstClr = srcClr ^ *dstClr;
 			break;
 		case BlendMode::OR:
-			dstClr = srcClr | dstClr;
+			*dstClr = srcClr | *dstClr;
 			break;
 		case BlendMode::NOR:
-			dstClr = ~(srcClr | dstClr);
+			*dstClr = ~(srcClr | *dstClr);
 			break;
 		case BlendMode::EQUIV:
-			dstClr = ~(srcClr ^ dstClr);
+			*dstClr = ~(srcClr ^ *dstClr);
 			break;
 		case BlendMode::INVERT:
-			dstClr = ~dstClr;
+			*dstClr = ~*dstClr;
 			break;
 		case BlendMode::OR_REVERSE:
-			dstClr = srcClr | (~dstClr);
+			*dstClr = srcClr | (~*dstClr);
 			break;
 		case BlendMode::COPY_INVERTED:
-			dstClr = ~srcClr;
+			*dstClr = ~srcClr;
 			break;
 		case BlendMode::OR_INVERTED:
-			dstClr = (~srcClr) | dstClr;
+			*dstClr = (~srcClr) | *dstClr;
 			break;
 		case BlendMode::NAND:
-			dstClr = ~(srcClr & dstClr);
+			*dstClr = ~(srcClr & *dstClr);
 			break;
 		case BlendMode::SET:
-			dstClr = 0xffffffff;
+			*dstClr = 0xffffffff;
 			break;
 		}
 	}
@@ -415,7 +416,7 @@ namespace EfbInterface
 		}
 		else if (bpmem.blendmode.logicopenable)
 		{
-			LogicBlend(*((u32*)color), dstClr, bpmem.blendmode.logicmode);
+			LogicBlend(*((u32*)color), &dstClr, bpmem.blendmode.logicmode);
 		}
 		else
 		{
@@ -436,12 +437,6 @@ namespace EfbInterface
 		{
 			SetPixelAlphaOnly(offset, dstClrPtr[ALP_C]);
 		}
-
-		// branchless bounding box update
-		PixelEngine::bbox[0] = std::min(x, PixelEngine::bbox[0]);
-		PixelEngine::bbox[1] = std::max(x, PixelEngine::bbox[1]);
-		PixelEngine::bbox[2] = std::min(y, PixelEngine::bbox[2]);
-		PixelEngine::bbox[3] = std::max(y, PixelEngine::bbox[3]);
 	}
 
 	void SetColor(u16 x, u16 y, u8 *color)
@@ -545,7 +540,7 @@ namespace EfbInterface
 			{
 				// YU pixel
 				xfb_in_ram[x].Y = scanline[i].Y + 16;
-				// we mix our color difrences in 10 bit space so it will round more accurately
+				// we mix our color differences in 10 bit space so it will round more accurately
 				// U[i] = 1/4 * U[i-1] + 1/2 * U[i] + 1/4 * U[i+1]
 				xfb_in_ram[x].UV = 128 + ((scanline[i-1].U + (scanline[i].U << 1) + scanline[i+1].U) >> 2);
 
@@ -558,7 +553,7 @@ namespace EfbInterface
 		}
 	}
 
-	// Like CopyToXFB, but we copy directly into the opengl colour texture without going via GameCube main memory or doing a yuyv conversion
+	// Like CopyToXFB, but we copy directly into the OpenGL color texture without going via GameCube main memory or doing a yuyv conversion
 	void BypassXFB(u8* texture, u32 fbWidth, u32 fbHeight, const EFBRectangle& sourceRc, float Gamma)
 	{
 		if (fbWidth*fbHeight > MAX_XFB_WIDTH*MAX_XFB_HEIGHT)

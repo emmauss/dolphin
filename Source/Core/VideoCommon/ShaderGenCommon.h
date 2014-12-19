@@ -14,6 +14,8 @@
 #include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "VideoCommon/VideoCommon.h"
+#include "VideoCommon/VideoConfig.h"
+#include "VideoCommon/XFMemory.h"
 
 /**
  * Common interface for classes that need to go through the shader generation path (GenerateVertexShader, GeneratePixelShader)
@@ -30,7 +32,8 @@ public:
 	 * Can be used like printf.
 	 * @note In the ShaderCode implementation, this does indeed write the parameter string to an internal buffer. However, you're free to do whatever you like with the parameter.
 	 */
-	void Write(const char* fmt, ...) {}
+	template<typename... Args>
+	void Write(const char*, Args...) {}
 
 	/*
 	 * Returns a read pointer to the internal buffer.
@@ -55,7 +58,7 @@ public:
 	 * @warning since most child classes use the default implementation you shouldn't access this directly without adding precautions against nullptr access (e.g. via adding a dummy structure, cf. the vertex/pixel shader generators)
 	 */
 	template<class uid_data>
-	uid_data& GetUidData() { return *(uid_data*)nullptr; }
+	uid_data* GetUidData() { return nullptr; }
 };
 
 /**
@@ -90,10 +93,11 @@ public:
 		return memcmp(this->values, obj.values, data.NumValues() * sizeof(*values)) < 0;
 	}
 
-	template<class T>
-	inline T& GetUidData() { return data; }
+	template<class uid_data2>
+	uid_data2* GetUidData() { return &data; }
+	const uid_data* GetUidData() const { return &data; }
+	const u8* GetUidDataRaw() const { return &values[0]; }
 
-	const uid_data& GetUidData() const { return data; }
 	size_t GetUidDataSize() const { return sizeof(values); }
 
 private:
@@ -191,7 +195,7 @@ public:
 				file << "\n\nShader uid:\n";
 				for (unsigned int i = 0; i < new_uid.GetUidDataSize(); ++i)
 				{
-					u32 value = ((u32*)&new_uid.GetUidData())[i];
+					u8 value = new_uid.GetUidDataRaw()[i];
 					if ((i % 4) == 0)
 					{
 						auto last_value = (i+3 < new_uid.GetUidDataSize()-1) ? i+3 : new_uid.GetUidDataSize();
@@ -199,7 +203,7 @@ public:
 						file << "Values " << std::setw(2) << i << " - " << last_value << ": ";
 					}
 
-					file << std::setw(8) << std::setfill('0') << std::hex << value << std::setw(1);
+					file << std::setw(2) << std::setfill('0') << std::hex << value << std::setw(1);
 					if ((i % 4) < 3)
 						file << ' ';
 					else
@@ -215,6 +219,44 @@ private:
 	std::map<UidT,std::string> m_shaders;
 	std::vector<UidT> m_uids;
 };
+
+template<class T>
+static void DefineOutputStructMember(T& object, API_TYPE api_type, const char* type, const char* name, int var_index, const char* semantic = "", int semantic_index = -1)
+{
+	object.Write("  %s %s", type, name);
+	if (var_index != -1)
+		object.Write("%d", var_index);
+
+	if (api_type == API_D3D && strlen(semantic) > 0)
+	{
+		if (semantic_index != -1)
+			object.Write(" : %s%d", semantic, semantic_index);
+		else
+			object.Write(" : %s", semantic);
+	}
+
+	object.Write(";\n");
+}
+
+template<class T>
+static inline void GenerateVSOutputStruct(T& object, API_TYPE api_type)
+{
+	object.Write("struct VS_OUTPUT {\n");
+
+	DefineOutputStructMember(object, api_type, "float4", "pos", -1, "POSITION");
+	DefineOutputStructMember(object, api_type, "float4", "colors_", 0, "COLOR", 0);
+	DefineOutputStructMember(object, api_type, "float4", "colors_", 1, "COLOR", 1);
+
+	for (unsigned int i = 0; i < xfmem.numTexGen.numTexGens; ++i)
+		DefineOutputStructMember(object, api_type, "float3", "tex", i, "TEXCOORD", i);
+
+	DefineOutputStructMember(object, api_type, "float4", "clipPos", -1, "TEXCOORD", xfmem.numTexGen.numTexGens);
+
+	if (g_ActiveConfig.bEnablePixelLighting)
+		DefineOutputStructMember(object, api_type, "float4", "Normal", -1, "TEXCOORD", xfmem.numTexGen.numTexGens + 1);
+
+	object.Write("};\n");
+}
 
 // Constant variable names
 #define I_COLORS        "color"
@@ -236,4 +278,19 @@ private:
 #define I_TRANSFORMMATRICES     "ctrmtx"
 #define I_NORMALMATRICES        "cnmtx"
 #define I_POSTTRANSFORMMATRICES "cpostmtx"
-#define I_DEPTHPARAMS           "cDepth" // farZ, zRange
+#define I_PIXELCENTERCORRECTION "cpixelcenter"
+
+#define I_STEREOPARAMS  "cstereo"
+#define I_LINEPTPARAMS  "clinept"
+#define I_TEXOFFSET     "ctexoffset"
+
+static const char s_shader_uniforms[] =
+	"\tfloat4 " I_POSNORMALMATRIX"[6];\n"
+	"\tfloat4 " I_PROJECTION"[4];\n"
+	"\tint4 " I_MATERIALS"[4];\n"
+	"\tLight " I_LIGHTS"[8];\n"
+	"\tfloat4 " I_TEXMATRICES"[24];\n"
+	"\tfloat4 " I_TRANSFORMMATRICES"[64];\n"
+	"\tfloat4 " I_NORMALMATRICES"[32];\n"
+	"\tfloat4 " I_POSTTRANSFORMMATRICES"[64];\n"
+	"\tfloat4 " I_PIXELCENTERCORRECTION";\n";

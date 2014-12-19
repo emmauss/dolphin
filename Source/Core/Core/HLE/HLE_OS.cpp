@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 
 #include "Core/HLE/HLE_OS.h"
@@ -76,7 +76,8 @@ void GetStringVA(std::string& _rOutBuffer, u32 strReg)
 		{
 			char* pArgument = ArgumentBuffer;
 			*pArgument++ = *pString++;
-			if (*pString == '%') {
+			if (*pString == '%')
+			{
 				_rOutBuffer += "%";
 				pString++;
 				continue;

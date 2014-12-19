@@ -14,21 +14,19 @@
 #include <wx/textctrl.h>
 
 #include "Common/BreakPoints.h"
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/StringUtil.h"
 #include "Core/PowerPC/PowerPC.h"
 #include "DolphinWX/WxUtils.h"
 #include "DolphinWX/Debugger/BreakpointDlg.h"
 #include "DolphinWX/Debugger/BreakpointWindow.h"
 
-BEGIN_EVENT_TABLE(BreakPointDlg, wxDialog)
-	EVT_BUTTON(wxID_OK, BreakPointDlg::OnOK)
-END_EVENT_TABLE()
-
 BreakPointDlg::BreakPointDlg(CBreakPointWindow *_Parent)
 	: wxDialog(_Parent, wxID_ANY, _("Add Breakpoint"))
 	, Parent(_Parent)
 {
+	Bind(wxEVT_BUTTON, &BreakPointDlg::OnOK, this, wxID_OK);
+
 	m_pEditAddress = new wxTextCtrl(this, wxID_ANY, "80000000");
 
 	wxBoxSizer *sMainSizer = new wxBoxSizer(wxVERTICAL);

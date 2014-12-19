@@ -68,11 +68,9 @@ public:
 
 	virtual void EmuStateChange(EMUSTATE_CHANGE) = 0;
 
-	virtual void UpdateFPSDisplay(const std::string&) = 0;
-
 	virtual unsigned int PeekMessages() = 0;
 
-	virtual bool Initialize(void *&) = 0;
+	virtual bool Initialize(void *window_handle) = 0;
 	virtual void Shutdown() = 0;
 	virtual void RunLoop(bool enable) = 0;
 
@@ -86,11 +84,12 @@ public:
 	virtual void Video_ExitLoop() = 0;
 	virtual void Video_Cleanup() = 0; // called from gl/d3d thread
 
-	virtual void Video_BeginField(u32, u32, u32) = 0;
+	virtual void Video_BeginField(u32, u32, u32, u32) = 0;
 	virtual void Video_EndField() = 0;
 
 	virtual u32 Video_AccessEFB(EFBAccessType, u32, u32, u32) = 0;
 	virtual u32 Video_GetQueryResult(PerfQueryType type) = 0;
+	virtual u16 Video_GetBoundingBox(int index) = 0;
 
 	virtual void Video_AddMessage(const std::string& msg, unsigned int milliseconds) = 0;
 	virtual void Video_ClearMessages() = 0;
@@ -118,6 +117,8 @@ public:
 	virtual void DoState(PointerWrap &p) = 0;
 
 	virtual void CheckInvalidState() = 0;
+
+	virtual void UpdateWantDeterminism(bool want) {}
 };
 
 extern std::vector<VideoBackend*> g_available_video_backends;
@@ -132,11 +133,12 @@ class VideoBackendHardware : public VideoBackend
 
 	void Video_EnterLoop() override;
 	void Video_ExitLoop() override;
-	void Video_BeginField(u32, u32, u32) override;
+	void Video_BeginField(u32, u32, u32, u32) override;
 	void Video_EndField() override;
 
 	u32 Video_AccessEFB(EFBAccessType, u32, u32, u32) override;
 	u32 Video_GetQueryResult(PerfQueryType type) override;
+	u16 Video_GetBoundingBox(int index) override;
 
 	void Video_AddMessage(const std::string& pstr, unsigned int milliseconds) override;
 	void Video_ClearMessages() override;
@@ -152,6 +154,8 @@ class VideoBackendHardware : public VideoBackend
 
 	void PauseAndLock(bool doLock, bool unpauseOnUnlock=true) override;
 	void DoState(PointerWrap &p) override;
+
+	void UpdateWantDeterminism(bool want) override;
 
 	bool m_invalid;
 

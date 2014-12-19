@@ -47,17 +47,31 @@ namespace BootManager
 // Apply fire liberally
 struct ConfigCache
 {
-	bool valid, bCPUThread, bSkipIdle, bEnableFPRF, bMMU, bDCBZOFF, m_EnableJIT, bDSPThread,
-	     bVBeamSpeedHack, bSyncGPU, bFastDiscSpeed, bMergeBlocks, bDSPHLE, bHLE_BS2, bTLBHack, bProgressive;
+	bool valid, bCPUThread, bSkipIdle, bFPRF, bBAT, bMMU, bDCBZOFF, m_EnableJIT, bDSPThread,
+	     bVBeamSpeedHack, bSyncGPU, bFastDiscSpeed, bMergeBlocks, bDSPHLE, bHLE_BS2, bProgressive;
 	int iCPUCore, Volume;
 	int iWiimoteSource[MAX_BBMOTES];
 	SIDevices Pads[MAX_SI_CHANNELS];
 	unsigned int framelimit, frameSkip;
 	TEXIDevices m_EXIDevice[MAX_EXI_CHANNELS];
 	std::string strBackend, sBackend;
+	std::string m_strGPUDeterminismMode;
 	bool bSetFramelimit, bSetEXIDevice[MAX_EXI_CHANNELS], bSetVolume, bSetPads[MAX_SI_CHANNELS], bSetWiimoteSource[MAX_BBMOTES], bSetFrameSkip;
 };
 static ConfigCache config_cache;
+
+static GPUDeterminismMode ParseGPUDeterminismMode(const std::string& mode)
+{
+	if (mode == "auto")
+		return GPU_DETERMINISM_AUTO;
+	if (mode == "none")
+		return GPU_DETERMINISM_NONE;
+	if (mode == "fake-completion")
+		return GPU_DETERMINISM_FAKE_COMPLETION;
+
+	NOTICE_LOG(BOOT, "Unknown GPU determinism mode %s", mode.c_str());
+	return GPU_DETERMINISM_AUTO;
+}
 
 // Boot the ISO or file
 bool BootCore(const std::string& _rFilename)
@@ -74,7 +88,7 @@ bool BootCore(const std::string& _rFilename)
 	StartUp.bRunCompareClient = false;
 	StartUp.bRunCompareServer = false;
 
-	// This is saved seperately from everything because it can be changed in SConfig::AutoSetup()
+	// This is saved separately from everything because it can be changed in SConfig::AutoSetup()
 	config_cache.bHLE_BS2 = StartUp.bHLE_BS2;
 
 	// If for example the ISO file is bad we return here
@@ -99,18 +113,18 @@ bool BootCore(const std::string& _rFilename)
 		config_cache.bCPUThread = StartUp.bCPUThread;
 		config_cache.bSkipIdle = StartUp.bSkipIdle;
 		config_cache.iCPUCore = StartUp.iCPUCore;
-		config_cache.bEnableFPRF = StartUp.bEnableFPRF;
+		config_cache.bFPRF = StartUp.bFPRF;
+		config_cache.bBAT = StartUp.bBAT;
 		config_cache.bMMU = StartUp.bMMU;
 		config_cache.bDCBZOFF = StartUp.bDCBZOFF;
-		config_cache.bTLBHack = StartUp.bTLBHack;
 		config_cache.bVBeamSpeedHack = StartUp.bVBeamSpeedHack;
 		config_cache.bSyncGPU = StartUp.bSyncGPU;
 		config_cache.bFastDiscSpeed = StartUp.bFastDiscSpeed;
 		config_cache.bMergeBlocks = StartUp.bMergeBlocks;
 		config_cache.bDSPHLE = StartUp.bDSPHLE;
 		config_cache.strBackend = StartUp.m_strVideoBackend;
+		config_cache.m_strGPUDeterminismMode = StartUp.m_strGPUDeterminismMode;
 		config_cache.m_EnableJIT = SConfig::GetInstance().m_DSPEnableJIT;
-		config_cache.bDSPThread = StartUp.bDSPThread;
 		config_cache.Volume = SConfig::GetInstance().m_Volume;
 		config_cache.sBackend = SConfig::GetInstance().sBackend;
 		config_cache.framelimit = SConfig::GetInstance().m_Framelimit;
@@ -141,16 +155,15 @@ bool BootCore(const std::string& _rFilename)
 
 		core_section->Get("CPUThread",        &StartUp.bCPUThread, StartUp.bCPUThread);
 		core_section->Get("SkipIdle",         &StartUp.bSkipIdle, StartUp.bSkipIdle);
-		core_section->Get("EnableFPRF",       &StartUp.bEnableFPRF, StartUp.bEnableFPRF);
+		core_section->Get("FPRF",             &StartUp.bFPRF, StartUp.bFPRF);
+		core_section->Get("BAT",              &StartUp.bBAT, StartUp.bBAT);
 		core_section->Get("MMU",              &StartUp.bMMU, StartUp.bMMU);
-		core_section->Get("TLBHack",          &StartUp.bTLBHack, StartUp.bTLBHack);
 		core_section->Get("DCBZ",             &StartUp.bDCBZOFF, StartUp.bDCBZOFF);
 		core_section->Get("VBeam",            &StartUp.bVBeamSpeedHack, StartUp.bVBeamSpeedHack);
 		core_section->Get("SyncGPU",          &StartUp.bSyncGPU, StartUp.bSyncGPU);
 		core_section->Get("FastDiscSpeed",    &StartUp.bFastDiscSpeed, StartUp.bFastDiscSpeed);
 		core_section->Get("BlockMerging",     &StartUp.bMergeBlocks, StartUp.bMergeBlocks);
 		core_section->Get("DSPHLE",           &StartUp.bDSPHLE, StartUp.bDSPHLE);
-		core_section->Get("DSPThread",        &StartUp.bDSPThread, StartUp.bDSPThread);
 		core_section->Get("GFXBackend",       &StartUp.m_strVideoBackend, StartUp.m_strVideoBackend);
 		core_section->Get("CPUCore",          &StartUp.iCPUCore, StartUp.iCPUCore);
 		core_section->Get("HLE_BS2",          &StartUp.bHLE_BS2, StartUp.bHLE_BS2);
@@ -168,6 +181,7 @@ bool BootCore(const std::string& _rFilename)
 		dsp_section->Get("EnableJIT",         &SConfig::GetInstance().m_DSPEnableJIT, SConfig::GetInstance().m_DSPEnableJIT);
 		dsp_section->Get("Backend",           &SConfig::GetInstance().sBackend, SConfig::GetInstance().sBackend);
 		VideoBackend::ActivateBackend(StartUp.m_strVideoBackend);
+		core_section->Get("GPUDeterminismMode", &StartUp.m_strGPUDeterminismMode, StartUp.m_strGPUDeterminismMode);
 
 		for (unsigned int i = 0; i < MAX_SI_CHANNELS; ++i)
 		{
@@ -206,6 +220,8 @@ bool BootCore(const std::string& _rFilename)
 			}
 		}
 	}
+
+	StartUp.m_GPUDeterminismMode = ParseGPUDeterminismMode(StartUp.m_strGPUDeterminismMode);
 
 	// Movie settings
 	if (Movie::IsPlayingInput() && Movie::IsConfigSaved())
@@ -266,17 +282,17 @@ void Stop()
 		StartUp.bCPUThread = config_cache.bCPUThread;
 		StartUp.bSkipIdle = config_cache.bSkipIdle;
 		StartUp.iCPUCore = config_cache.iCPUCore;
-		StartUp.bEnableFPRF = config_cache.bEnableFPRF;
+		StartUp.bFPRF = config_cache.bFPRF;
+		StartUp.bBAT = config_cache.bBAT;
 		StartUp.bMMU = config_cache.bMMU;
 		StartUp.bDCBZOFF = config_cache.bDCBZOFF;
-		StartUp.bTLBHack = config_cache.bTLBHack;
 		StartUp.bVBeamSpeedHack = config_cache.bVBeamSpeedHack;
 		StartUp.bSyncGPU = config_cache.bSyncGPU;
 		StartUp.bFastDiscSpeed = config_cache.bFastDiscSpeed;
 		StartUp.bMergeBlocks = config_cache.bMergeBlocks;
 		StartUp.bDSPHLE = config_cache.bDSPHLE;
-		StartUp.bDSPThread = config_cache.bDSPThread;
 		StartUp.m_strVideoBackend = config_cache.strBackend;
+		StartUp.m_strGPUDeterminismMode = config_cache.m_strGPUDeterminismMode;
 		VideoBackend::ActivateBackend(StartUp.m_strVideoBackend);
 		StartUp.bHLE_BS2 = config_cache.bHLE_BS2;
 		SConfig::GetInstance().sBackend = config_cache.sBackend;

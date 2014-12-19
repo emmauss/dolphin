@@ -1,4 +1,5 @@
-set(SRCS	BPFunctions.cpp
+set(SRCS	BoundingBox.cpp
+			BPFunctions.cpp
 			BPMemory.cpp
 			BPStructs.cpp
 			CPMemory.cpp
@@ -8,6 +9,8 @@ set(SRCS	BPFunctions.cpp
 			Fifo.cpp
 			FPSCounter.cpp
 			FramebufferManagerBase.cpp
+			GeometryShaderGen.cpp
+			GeometryShaderManager.cpp
 			HiresTextures.cpp
 			ImageWrite.cpp
 			IndexGenerator.cpp
@@ -23,6 +26,7 @@ set(SRCS	BPFunctions.cpp
 			Statistics.cpp
 			TextureCacheBase.cpp
 			TextureConversionShader.cpp
+			TextureDecoder_Common.cpp
 			VertexLoader.cpp
 			VertexLoaderManager.cpp
 			VertexLoader_Color.cpp
@@ -48,10 +52,6 @@ if(NOT ${CL} STREQUAL CL-NOTFOUND)
 	list(APPEND LIBS ${CL})
 endif()
 
-if(wxWidgets_FOUND AND WIN32)
-	set(SRCS ${SRCS} EmuWindow.cpp)
-endif()
-
 if(LIBAV_FOUND OR WIN32)
 	set(SRCS ${SRCS} AVIDump.cpp)
 endif()
@@ -61,6 +61,5 @@ add_dolphin_library(videocommon "${SRCS}" "${LIBS}")
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 	if(LIBAV_FOUND)
 		target_link_libraries(videocommon ${LIBS} ${LIBAV_LIBRARIES})
-		add_definitions(-D__STDC_CONSTANT_MACROS)
 	endif()
 endif()

@@ -19,6 +19,7 @@
 #include "Common/StringUtil.h"
 #include "Common/Timer.h"
 
+#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/Host.h"
 #include "Core/FifoPlayer/FifoRecorder.h"
@@ -65,7 +66,6 @@ TargetRectangle Renderer::target_rc;
 
 int Renderer::s_LastEFBScale;
 
-bool Renderer::s_skipSwap;
 bool Renderer::XFBWrited;
 
 PEControl::PixelFormat Renderer::prev_efb_format = PEControl::INVALID_FMT;
@@ -98,7 +98,7 @@ Renderer::~Renderer()
 	efb_scale_numeratorX = efb_scale_numeratorY = efb_scale_denominatorX = efb_scale_denominatorY = 1;
 
 #if defined _WIN32 || defined HAVE_LIBAV
-	if (g_ActiveConfig.bDumpFrames && bLastFrameDumped && bAVIDumping)
+	if (SConfig::GetInstance().m_DumpFrames && bLastFrameDumped && bAVIDumping)
 		AVIDump::Stop();
 #else
 	if (pFrameDump.IsOpen())
@@ -113,8 +113,6 @@ void Renderer::RenderToXFB(u32 xfbAddr, const EFBRectangle& sourceRc, u32 fbWidt
 	if (!fbWidth || !fbHeight)
 		return;
 
-	s_skipSwap = g_bSkipCurrentFrame;
-
 	VideoFifo_CheckEFBAccess();
 	VideoFifo_CheckSwapRequestAt(xfbAddr, fbWidth, fbHeight);
 	XFBWrited = true;
@@ -125,8 +123,8 @@ void Renderer::RenderToXFB(u32 xfbAddr, const EFBRectangle& sourceRc, u32 fbWidt
 	}
 	else
 	{
-		Swap(xfbAddr, fbWidth, fbHeight,sourceRc,Gamma);
-		Common::AtomicStoreRelease(s_swapRequested, false);
+		Swap(xfbAddr, fbWidth, fbWidth, fbHeight, sourceRc, Gamma);
+		s_swapRequested.Clear();
 	}
 }
 
@@ -134,7 +132,7 @@ int Renderer::EFBToScaledX(int x)
 {
 	switch (g_ActiveConfig.iEFBScale)
 	{
-	case SCALE_AUTO: // fractional
+		case SCALE_AUTO: // fractional
 			return FramebufferManagerBase::ScaleToVirtualXfbWidth(x, s_backbuffer_width);
 
 		default:
@@ -154,17 +152,17 @@ int Renderer::EFBToScaledY(int y)
 	};
 }
 
-void Renderer::CalculateTargetScale(int x, int y, int &scaledX, int &scaledY)
+void Renderer::CalculateTargetScale(int x, int y, int* scaledX, int* scaledY)
 {
 	if (g_ActiveConfig.iEFBScale == SCALE_AUTO || g_ActiveConfig.iEFBScale == SCALE_AUTO_INTEGRAL)
 	{
-		scaledX = x;
-		scaledY = y;
+		*scaledX = x;
+		*scaledY = y;
 	}
 	else
 	{
-		scaledX = x * (int)efb_scale_numeratorX / (int)efb_scale_denominatorX;
-		scaledY = y * (int)efb_scale_numeratorY / (int)efb_scale_denominatorY;
+		*scaledX = x * (int)efb_scale_numeratorX / (int)efb_scale_denominatorX;
+		*scaledY = y * (int)efb_scale_numeratorY / (int)efb_scale_denominatorY;
 	}
 }
 
@@ -172,52 +170,17 @@ void Renderer::CalculateTargetScale(int x, int y, int &scaledX, int &scaledY)
 bool Renderer::CalculateTargetSize(unsigned int framebuffer_width, unsigned int framebuffer_height)
 {
 	int newEFBWidth, newEFBHeight;
+	newEFBWidth = newEFBHeight = 0;
 
 	// TODO: Ugly. Clean up
 	switch (s_LastEFBScale)
 	{
-		case 2: // 1x
-			efb_scale_numeratorX = efb_scale_numeratorY = 1;
-			efb_scale_denominatorX = efb_scale_denominatorY = 1;
-			break;
-
-		case 3: // 1.5x
-			efb_scale_numeratorX = efb_scale_numeratorY = 3;
-			efb_scale_denominatorX = efb_scale_denominatorY = 2;
-			break;
-
-		case 4: // 2x
-			efb_scale_numeratorX = efb_scale_numeratorY = 2;
-			efb_scale_denominatorX = efb_scale_denominatorY = 1;
-			break;
-
-		case 5: // 2.5x
-			efb_scale_numeratorX = efb_scale_numeratorY = 5;
-			efb_scale_denominatorX = efb_scale_denominatorY = 2;
-			break;
-
-		case 6: // 3x
-			efb_scale_numeratorX = efb_scale_numeratorY = 3;
-			efb_scale_denominatorX = efb_scale_denominatorY = 1;
-			break;
-
-		case 7: // 4x
-			efb_scale_numeratorX = efb_scale_numeratorY = 4;
-			efb_scale_denominatorX = efb_scale_denominatorY = 1;
-			break;
-
-		default: // fractional & integral handled later
-			break;
-	}
-
-	switch (s_LastEFBScale)
-	{
-		case 0: // fractional
-		case 1: // integral
+		case SCALE_AUTO:
+		case SCALE_AUTO_INTEGRAL:
 			newEFBWidth = FramebufferManagerBase::ScaleToVirtualXfbWidth(EFB_WIDTH, framebuffer_width);
 			newEFBHeight = FramebufferManagerBase::ScaleToVirtualXfbHeight(EFB_HEIGHT, framebuffer_height);
 
-			if (s_LastEFBScale == 1)
+			if (s_LastEFBScale == SCALE_AUTO_INTEGRAL)
 			{
 				newEFBWidth = ((newEFBWidth-1) / EFB_WIDTH + 1) * EFB_WIDTH;
 				newEFBHeight = ((newEFBHeight-1) / EFB_HEIGHT + 1) * EFB_HEIGHT;
@@ -228,10 +191,45 @@ bool Renderer::CalculateTargetSize(unsigned int framebuffer_width, unsigned int 
 			efb_scale_denominatorY = EFB_HEIGHT;
 			break;
 
+		case SCALE_1X:
+			efb_scale_numeratorX = efb_scale_numeratorY = 1;
+			efb_scale_denominatorX = efb_scale_denominatorY = 1;
+			break;
+
+		case SCALE_1_5X:
+			efb_scale_numeratorX = efb_scale_numeratorY = 3;
+			efb_scale_denominatorX = efb_scale_denominatorY = 2;
+			break;
+
+		case SCALE_2X:
+			efb_scale_numeratorX = efb_scale_numeratorY = 2;
+			efb_scale_denominatorX = efb_scale_denominatorY = 1;
+			break;
+
+		case SCALE_2_5X:
+			efb_scale_numeratorX = efb_scale_numeratorY = 5;
+			efb_scale_denominatorX = efb_scale_denominatorY = 2;
+			break;
+
+		case SCALE_3X:
+		case SCALE_4X:
 		default:
-			CalculateTargetScale(EFB_WIDTH, EFB_HEIGHT, newEFBWidth, newEFBHeight);
+			efb_scale_numeratorX = efb_scale_numeratorY = s_LastEFBScale - 3;
+			efb_scale_denominatorX = efb_scale_denominatorY = 1;
+
+
+			int maxSize;
+			maxSize = GetMaxTextureSize();
+			if ((unsigned)maxSize < EFB_WIDTH * efb_scale_numeratorX / efb_scale_denominatorX)
+			{
+				efb_scale_numeratorX = efb_scale_numeratorY = (maxSize / EFB_WIDTH);
+				efb_scale_denominatorX = efb_scale_denominatorY = 1;
+			}
+
 			break;
 	}
+	if (s_LastEFBScale > SCALE_AUTO_INTEGRAL)
+		CalculateTargetScale(EFB_WIDTH, EFB_HEIGHT, &newEFBWidth, &newEFBHeight);
 
 	if (newEFBWidth != s_target_width || newEFBHeight != s_target_height)
 	{
@@ -240,6 +238,42 @@ bool Renderer::CalculateTargetSize(unsigned int framebuffer_width, unsigned int 
 		return true;
 	}
 	return false;
+}
+
+void Renderer::ConvertStereoRectangle(const TargetRectangle& rc, TargetRectangle& leftRc, TargetRectangle& rightRc)
+{
+	// Resize target to half its original size
+	TargetRectangle drawRc = rc;
+	if (g_ActiveConfig.iStereoMode == STEREO_TAB)
+	{
+		// The height may be negative due to flipped rectangles
+		int height = rc.bottom - rc.top;
+		drawRc.top += height / 4;
+		drawRc.bottom -= height / 4;
+	}
+	else
+	{
+		int width = rc.right - rc.left;
+		drawRc.left += width / 4;
+		drawRc.right -= width / 4;
+	}
+
+	// Create two target rectangle offset to the sides of the backbuffer
+	leftRc = drawRc, rightRc = drawRc;
+	if (g_ActiveConfig.iStereoMode == STEREO_TAB)
+	{
+		leftRc.top -= s_backbuffer_height / 4;
+		leftRc.bottom -= s_backbuffer_height / 4;
+		rightRc.top += s_backbuffer_height / 4;
+		rightRc.bottom += s_backbuffer_height / 4;
+	}
+	else
+	{
+		leftRc.left -= s_backbuffer_width / 4;
+		leftRc.right -= s_backbuffer_width / 4;
+		rightRc.left += s_backbuffer_width / 4;
+		rightRc.right += s_backbuffer_width / 4;
+	}
 }
 
 void Renderer::SetScreenshot(const std::string& filename)
@@ -480,7 +514,7 @@ void Renderer::SetWindowSize(int width, int height)
 		height = 1;
 
 	// Scale the window size by the EFB scale.
-	CalculateTargetScale(width, height, width, height);
+	CalculateTargetScale(width, height, &width, &height);
 
 	Host_RequestRenderWindowSize(width, height);
 }
@@ -517,10 +551,10 @@ void Renderer::RecordVideoMemory()
 	FifoRecorder::GetInstance().SetVideoMemory(bpmem_ptr, cpmem, xfmem_ptr, xfregs_ptr, xfregs_size);
 }
 
-void Renderer::Swap(u32 xfbAddr, u32 fbWidth, u32 fbHeight, const EFBRectangle& rc, float Gamma)
+void Renderer::Swap(u32 xfbAddr, u32 fbWidth, u32 fbStride, u32 fbHeight, const EFBRectangle& rc, float Gamma)
 {
 	// TODO: merge more generic parts into VideoCommon
-	g_renderer->SwapImpl(xfbAddr, fbWidth, fbHeight, rc, Gamma);
+	g_renderer->SwapImpl(xfbAddr, fbWidth, fbStride, fbHeight, rc, Gamma);
 
 	if (XFBWrited)
 		g_renderer->m_fps_counter.Update();

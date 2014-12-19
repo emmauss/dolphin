@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "VideoCommon/VideoBackendBase.h"
 
 class PointerWrap;
@@ -16,6 +16,7 @@ namespace CommandProcessor
 {
 
 extern SCPFifoStruct fifo; //This one is shared between gfx thread and emulator thread.
+
 extern volatile bool isPossibleWaitingSetDrawDone; //This one is used for sync gfx thread and emulator thread.
 extern volatile bool interruptSet;
 extern volatile bool interruptWaiting;
@@ -135,12 +136,11 @@ void DoState(PointerWrap &p);
 
 void RegisterMMIO(MMIO::Mapping* mmio, u32 base);
 
-void SetCpStatus(bool isCPUThread = false);
+void SetCPStatusFromGPU();
+void SetCPStatusFromCPU();
 void GatherPipeBursted();
 void UpdateInterrupts(u64 userdata);
 void UpdateInterruptsFromVideoBackend(u64 userdata);
-
-bool AllowIdleSkipping();
 
 void SetCpClearRegister();
 void SetCpControlRegister();

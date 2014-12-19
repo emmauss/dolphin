@@ -2,7 +2,6 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -28,8 +27,8 @@
 #include <wx/utils.h>
 #include <wx/window.h>
 
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/CPUDetect.h"
 #include "Common/FileUtil.h"
 #include "Common/IniFile.h"
@@ -51,6 +50,8 @@
 #include "DolphinWX/WxUtils.h"
 #include "DolphinWX/Debugger/CodeWindow.h"
 #include "DolphinWX/Debugger/JitWindow.h"
+
+#include "UICommon/UICommon.h"
 
 #include "VideoCommon/VideoBackendBase.h"
 
@@ -83,25 +84,10 @@
 
 class wxFrame;
 
-// Nvidia drivers >= v302 will check if the application exports a global
-// variable named NvOptimusEnablement to know if it should run the app in high
-// performance graphics mode or using the IGP.
-#ifdef WIN32
-extern "C" {
-	__declspec(dllexport) DWORD NvOptimusEnablement = 1;
-}
-#endif
-
 // ------------
 //  Main window
 
 IMPLEMENT_APP(DolphinApp)
-
-BEGIN_EVENT_TABLE(DolphinApp, wxApp)
-	EVT_TIMER(wxID_ANY, DolphinApp::AfterInit)
-	EVT_QUERY_END_SESSION(DolphinApp::OnEndSession)
-	EVT_END_SESSION(DolphinApp::OnEndSession)
-END_EVENT_TABLE()
 
 bool wxMsgAlert(const char*, const char*, bool, int);
 std::string wxStringTranslator(const char *);
@@ -111,7 +97,8 @@ CFrame* main_frame = nullptr;
 #ifdef WIN32
 //Has no error handling.
 //I think that if an error occurs here there's no way to handle it anyway.
-LONG WINAPI MyUnhandledExceptionFilter(LPEXCEPTION_POINTERS e) {
+LONG WINAPI MyUnhandledExceptionFilter(LPEXCEPTION_POINTERS e)
+{
 	//EnterCriticalSection(&g_uefcs);
 
 	File::IOFile file("exceptioninfo.txt", "a");
@@ -141,10 +128,13 @@ bool DolphinApp::Initialize(int& c, wxChar **v)
 	return wxApp::Initialize(c, v);
 }
 
-// The `main program' equivalent that creates the main window and return the main frame
+// The 'main program' equivalent that creates the main window and return the main frame
 
 bool DolphinApp::OnInit()
 {
+	Bind(wxEVT_QUERY_END_SESSION, &DolphinApp::OnEndSession, this);
+	Bind(wxEVT_END_SESSION, &DolphinApp::OnEndSession, this);
+
 	InitLanguageSupport();
 
 	// Declarations and definitions
@@ -177,7 +167,7 @@ bool DolphinApp::OnInit()
 		},
 		{
 			wxCMD_LINE_OPTION, "e", "exec",
-			"Loads the specified file (DOL,ELF,GCM,ISO,WAD)",
+			"Loads the specified file (ELF, DOL, GCM, ISO, WBFS, CISO, GCZ, WAD)",
 			wxCMD_LINE_VAL_STRING, wxCMD_LINE_PARAM_OPTIONAL
 		},
 		{
@@ -212,14 +202,20 @@ bool DolphinApp::OnInit()
 
 	// Gets the command line parameters
 	wxCmdLineParser parser(cmdLineDesc, argc, argv);
-	if (parser.Parse() != 0)
+	if (argc == 2 && File::Exists(argv[1].ToUTF8().data()))
+	{
+		LoadFile = true;
+		FileToLoad = argv[1];
+	}
+	else if (parser.Parse() != 0)
 	{
 		return false;
 	}
 
 	UseDebugger = parser.Found("debugger");
 	UseLogger = parser.Found("logger");
-	LoadFile = parser.Found("exec", &FileToLoad);
+	if (!LoadFile)
+		LoadFile = parser.Found("exec", &FileToLoad);
 	BatchMode = parser.Found("batch");
 	selectVideoBackend = parser.Found("video_backend", &videoBackendName);
 	selectAudioEmulation = parser.Found("audio_emulation", &audioEmulationName);
@@ -244,54 +240,8 @@ bool DolphinApp::OnInit()
 	wxHandleFatalExceptions(true);
 #endif
 
-#ifndef _M_ARM
-	// TODO: if First Boot
-	if (!cpu_info.bSSE2)
-	{
-		PanicAlertT("Hi,\n\nDolphin requires that your CPU has support for SSE2 extensions.\n"
-				"Unfortunately your CPU does not support them, so Dolphin will not run.\n\n"
-				"Sayonara!\n");
-		return false;
-	}
-#endif
-#ifdef __APPLE__
-	if (floor(NSAppKitVersionNumber) < NSAppKitVersionNumber10_7)
-	{
-		PanicAlertT("Hi,\n\nDolphin requires Mac OS X 10.7 or greater.\n"
-				"Unfortunately you're running an old version of OS X.\n"
-				"The last Dolphin version to support OS X 10.6 is Dolphin 3.5\n"
-				"Please upgrade to 10.7 or greater to use the newest Dolphin version.\n\n"
-				"Sayonara!\n");
-		return false;
-	}
-#endif
-
-	// Copy initial Wii NAND data from Sys to User.
-	File::CopyDir(File::GetSysDirectory() + WII_USER_DIR DIR_SEP,
-	              File::GetUserPath(D_WIIUSER_IDX));
-
-	File::CreateFullPath(File::GetUserPath(D_USER_IDX));
-	File::CreateFullPath(File::GetUserPath(D_CACHE_IDX));
-	File::CreateFullPath(File::GetUserPath(D_CONFIG_IDX));
-	File::CreateFullPath(File::GetUserPath(D_DUMPDSP_IDX));
-	File::CreateFullPath(File::GetUserPath(D_DUMPTEXTURES_IDX));
-	File::CreateFullPath(File::GetUserPath(D_GAMESETTINGS_IDX));
-	File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX));
-	File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX) + USA_DIR DIR_SEP);
-	File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX) + EUR_DIR DIR_SEP);
-	File::CreateFullPath(File::GetUserPath(D_GCUSER_IDX) + JAP_DIR DIR_SEP);
-	File::CreateFullPath(File::GetUserPath(D_HIRESTEXTURES_IDX));
-	File::CreateFullPath(File::GetUserPath(D_MAILLOGS_IDX));
-	File::CreateFullPath(File::GetUserPath(D_MAPS_IDX));
-	File::CreateFullPath(File::GetUserPath(D_SCREENSHOTS_IDX));
-	File::CreateFullPath(File::GetUserPath(D_SHADERS_IDX));
-	File::CreateFullPath(File::GetUserPath(D_STATESAVES_IDX));
-	File::CreateFullPath(File::GetUserPath(D_THEMES_IDX));
-
-	LogManager::Init();
-	SConfig::Init();
-	VideoBackend::PopulateList();
-	WiimoteReal::LoadSettings();
+	UICommon::CreateDirectories();
+	UICommon::Init();
 
 	if (selectVideoBackend && videoBackendName != wxEmptyString)
 		SConfig::GetInstance().m_LocalCoreStartupParameter.m_strVideoBackend =
@@ -310,25 +260,24 @@ bool DolphinApp::OnInit()
 	// Enable the PNG image handler for screenshots
 	wxImage::AddHandler(new wxPNGHandler);
 
-	SetEnableAlert(SConfig::GetInstance().m_LocalCoreStartupParameter.bUsePanicHandlers);
-
 	int x = SConfig::GetInstance().m_LocalCoreStartupParameter.iPosX;
 	int y = SConfig::GetInstance().m_LocalCoreStartupParameter.iPosY;
 	int w = SConfig::GetInstance().m_LocalCoreStartupParameter.iWidth;
 	int h = SConfig::GetInstance().m_LocalCoreStartupParameter.iHeight;
 
-#ifdef _WIN32
 	if (File::Exists("www.dolphin-emulator.com.txt"))
 	{
 		File::Delete("www.dolphin-emulator.com.txt");
-		MessageBox(nullptr,
-				   L"This version of Dolphin was downloaded from a website stealing money from developers of the emulator. Please "
-				   L"download Dolphin from the official website instead: http://dolphin-emu.org/",
-				   L"Unofficial version detected", MB_OK | MB_ICONWARNING);
-		ShellExecute(nullptr, L"open", L"http://dolphin-emu.org/?ref=badver", nullptr, nullptr, SW_SHOWDEFAULT);
+		wxMessageDialog dlg(nullptr, _(
+		    "This version of Dolphin was downloaded from a website stealing money from developers of the emulator. Please "
+		    "download Dolphin from the official website instead: https://dolphin-emu.org/"),
+		    _("Unofficial version detected"), wxOK | wxICON_WARNING);
+		dlg.ShowModal();
+
+		wxLaunchDefaultBrowser("https://dolphin-emu.org/?ref=badver");
+
 		exit(0);
 	}
-#endif
 
 	// The following is not needed with X11, where window managers
 	// do not allow windows to be created off the desktop.
@@ -345,18 +294,14 @@ bool DolphinApp::OnInit()
 		y = wxDefaultCoord;
 #endif
 
-	main_frame = new CFrame((wxFrame*)nullptr, wxID_ANY,
+	main_frame = new CFrame(nullptr, wxID_ANY,
 				StrToWxStr(scm_rev_str),
 				wxPoint(x, y), wxSize(w, h),
 				UseDebugger, BatchMode, UseLogger);
 	SetTopWindow(main_frame);
 	main_frame->SetMinSize(wxSize(400, 300));
 
-	// Postpone final actions until event handler is running.
-	// Updating the game list makes use of wxProgressDialog which may
-	// only be run after OnInit() when the event handler is running.
-	m_afterinit = new wxTimer(this, wxID_ANY);
-	m_afterinit->Start(1, wxTIMER_ONE_SHOT);
+	AfterInit();
 
 	return true;
 }
@@ -365,16 +310,11 @@ void DolphinApp::MacOpenFile(const wxString &fileName)
 {
 	FileToLoad = fileName;
 	LoadFile = true;
-
-	if (m_afterinit == nullptr)
-		main_frame->BootGame(WxStrToStr(FileToLoad));
+	main_frame->BootGame(WxStrToStr(FileToLoad));
 }
 
-void DolphinApp::AfterInit(wxTimerEvent& WXUNUSED(event))
+void DolphinApp::AfterInit()
 {
-	delete m_afterinit;
-	m_afterinit = nullptr;
-
 	if (!BatchMode)
 		main_frame->UpdateGameList();
 
@@ -388,7 +328,7 @@ void DolphinApp::AfterInit(wxTimerEvent& WXUNUSED(event))
 			}
 			else
 			{
-				main_frame->BootGame(std::string(""));
+				main_frame->BootGame("");
 			}
 		}
 	}
@@ -444,7 +384,7 @@ void DolphinApp::InitLanguageSupport()
 
 void DolphinApp::OnEndSession(wxCloseEvent& event)
 {
-	// Close if we've recieved wxEVT_END_SESSION (ignore wxEVT_QUERY_END_SESSION)
+	// Close if we've received wxEVT_END_SESSION (ignore wxEVT_QUERY_END_SESSION)
 	if (!event.CanVeto())
 	{
 		main_frame->Close(true);
@@ -454,10 +394,7 @@ void DolphinApp::OnEndSession(wxCloseEvent& event)
 int DolphinApp::OnExit()
 {
 	Core::Shutdown();
-	WiimoteReal::Shutdown();
-	VideoBackend::ClearList();
-	SConfig::Shutdown();
-	LogManager::Shutdown();
+	UICommon::Shutdown();
 
 	delete m_locale;
 
@@ -473,27 +410,13 @@ void DolphinApp::OnFatalException()
 // ------------
 // Talk to GUI
 
-void Host_SysMessage(const char *fmt, ...)
-{
-	va_list list;
-	char msg[512];
-
-	va_start(list, fmt);
-	vsprintf(msg, fmt, list);
-	va_end(list);
-
-	if (msg[strlen(msg)-1] == '\n') msg[strlen(msg)-1] = 0;
-	//wxMessageBox(StrToWxStr(msg));
-	PanicAlert("%s", msg);
-}
-
 bool wxMsgAlert(const char* caption, const char* text, bool yes_no, int /*Style*/)
 {
 #ifdef __WXGTK__
 	if (wxIsMainThread())
 #endif
 		return wxYES == wxMessageBox(StrToWxStr(text), StrToWxStr(caption),
-				(yes_no) ? wxYES_NO : wxOK, wxGetActiveWindow());
+				(yes_no) ? wxYES_NO : wxOK, wxWindow::FindFocus());
 #ifdef __WXGTK__
 	else
 	{
@@ -529,7 +452,7 @@ void* Host_GetRenderHandle()
 	return main_frame->GetRenderHandle();
 }
 
-// OK, this thread boundary is DANGEROUS on linux
+// OK, this thread boundary is DANGEROUS on Linux
 // wxPostEvent / wxAddPendingEvent is the solution.
 void Host_NotifyMapLoaded()
 {
@@ -571,11 +494,6 @@ void Host_UpdateTitle(const std::string& title)
 	main_frame->GetEventHandler()->AddPendingEvent(event);
 }
 
-void Host_GetRenderWindowSize(int& x, int& y, int& width, int& height)
-{
-	main_frame->GetRenderWindowSize(x, y, width, height);
-}
-
 void Host_RequestRenderWindowSize(int width, int height)
 {
 	wxCommandEvent event(wxEVT_HOST_COMMAND, IDM_WINDOWSIZEREQUEST);
@@ -598,24 +516,13 @@ void Host_SetStartupDebuggingParameters()
 		StartUp.bBootToPause = main_frame->g_pCodeWindow->BootToPause();
 		StartUp.bAutomaticStart = main_frame->g_pCodeWindow->AutomaticStart();
 		StartUp.bJITNoBlockCache = main_frame->g_pCodeWindow->JITNoBlockCache();
-		StartUp.bJITBlockLinking = main_frame->g_pCodeWindow->JITBlockLinking();
+		StartUp.bJITNoBlockLinking = main_frame->g_pCodeWindow->JITNoBlockLinking();
 	}
 	else
 	{
 		StartUp.bBootToPause = false;
 	}
 	StartUp.bEnableDebugging = main_frame->g_pCodeWindow ? true : false; // RUNNING_DEBUG
-}
-
-void Host_UpdateStatusBar(const std::string& text, int Field)
-{
-	wxCommandEvent event(wxEVT_HOST_COMMAND, IDM_UPDATESTATUSBAR);
-	// Set the event string
-	event.SetString(StrToWxStr(text));
-	// Update statusbar field
-	event.SetInt(Field);
-	// Post message
-	main_frame->GetEventHandler()->AddPendingEvent(event);
 }
 
 void Host_SetWiiMoteConnectionState(int _State)

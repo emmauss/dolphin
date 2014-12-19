@@ -8,7 +8,8 @@ namespace OGL
 
 void ClearEFBCache();
 
-enum GLSL_VERSION {
+enum GLSL_VERSION
+{
 	GLSL_130,
 	GLSL_140,
 	GLSL_150,  // and above
@@ -17,7 +18,8 @@ enum GLSL_VERSION {
 };
 
 // ogl-only config, so not in VideoConfig.h
-struct VideoConfig {
+struct VideoConfig
+{
 	bool bSupportsGLSLCache;
 	bool bSupportsGLPinnedMemory;
 	bool bSupportsGLSync;
@@ -28,6 +30,7 @@ struct VideoConfig {
 	GLSL_VERSION eSupportedGLSLVersion;
 	bool bSupportOGL31;
 	bool bSupportViewportFloat;
+	bool bSupportsAEP;
 
 	const char* gl_vendor;
 	const char* gl_renderer;
@@ -54,7 +57,6 @@ public:
 	void SetDepthMode() override;
 	void SetLogicOpMode() override;
 	void SetDitherMode() override;
-	void SetLineWidth() override;
 	void SetSamplerState(int stage,int texindex) override;
 	void SetInterlacingMode() override;
 	void SetViewport() override;
@@ -69,18 +71,23 @@ public:
 
 	u32 AccessEFB(EFBAccessType type, u32 x, u32 y, u32 poke_data) override;
 
+	u16 BBoxRead(int index) override;
+	void BBoxWrite(int index, u16 value) override;
+
 	void ResetAPIState() override;
 	void RestoreAPIState() override;
 
 	TargetRectangle ConvertEFBRectangle(const EFBRectangle& rc) override;
 
-	void SwapImpl(u32 xfbAddr, u32 fbWidth, u32 fbHeight, const EFBRectangle& rc,float Gamma) override;
+	void SwapImpl(u32 xfbAddr, u32 fbWidth, u32 fbStride, u32 fbHeight, const EFBRectangle& rc, float Gamma) override;
 
 	void ClearScreen(const EFBRectangle& rc, bool colorEnable, bool alphaEnable, bool zEnable, u32 color, u32 z) override;
 
 	void ReinterpretPixelData(unsigned int convtype) override;
 
 	bool SaveScreenshot(const std::string &filename, const TargetRectangle &rc) override;
+
+	int GetMaxTextureSize() override;
 
 private:
 	void UpdateEFBCache(EFBAccessType type, u32 cacheRectIdx, const EFBRectangle& efbPixelRc, const TargetRectangle& targetPixelRc, const u32* data);

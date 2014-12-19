@@ -2,7 +2,6 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-
 // see IniFile.h
 
 #include <algorithm>
@@ -53,30 +52,6 @@ void IniFile::Section::Set(const std::string& key, const std::string& newValue)
 }
 
 void IniFile::Section::Set(const std::string& key, const std::string& newValue, const std::string& defaultValue)
-{
-	if (newValue != defaultValue)
-		Set(key, newValue);
-	else
-		Delete(key);
-}
-
-void IniFile::Section::Set(const std::string& key, const float newValue, const float defaultValue)
-{
-	if (newValue != defaultValue)
-		Set(key, newValue);
-	else
-		Delete(key);
-}
-
-void IniFile::Section::Set(const std::string& key, int newValue, int defaultValue)
-{
-	if (newValue != defaultValue)
-		Set(key, newValue);
-	else
-		Delete(key);
-}
-
-void IniFile::Section::Set(const std::string& key, bool newValue, bool defaultValue)
 {
 	if (newValue != defaultValue)
 		Set(key, newValue);
@@ -315,7 +290,6 @@ bool IniFile::GetLines(const std::string& sectionName, std::vector<std::string>*
 
 	return true;
 }
-
 
 void IniFile::SortSections()
 {

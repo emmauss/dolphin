@@ -10,7 +10,7 @@ namespace SW
 
 class VideoSoftware : public VideoBackend
 {
-	bool Initialize(void *&) override;
+	bool Initialize(void *window_handle) override;
 	void Shutdown() override;
 
 	std::string GetName() const override;
@@ -27,11 +27,12 @@ class VideoSoftware : public VideoBackend
 
 	void Video_EnterLoop() override;
 	void Video_ExitLoop() override;
-	void Video_BeginField(u32, u32, u32) override;
+	void Video_BeginField(u32, u32, u32, u32) override;
 	void Video_EndField() override;
 
 	u32 Video_AccessEFB(EFBAccessType, u32, u32, u32) override;
 	u32 Video_GetQueryResult(PerfQueryType type) override;
+	u16 Video_GetBoundingBox(int index) override;
 
 	void Video_AddMessage(const std::string& msg, unsigned int milliseconds) override;
 	void Video_ClearMessages() override;
@@ -48,7 +49,6 @@ class VideoSoftware : public VideoBackend
 
 	void RegisterCPMMIO(MMIO::Mapping* mmio, u32 base) override;
 
-	void UpdateFPSDisplay(const std::string&) override;
 	unsigned int PeekMessages() override;
 
 	void PauseAndLock(bool doLock, bool unpauseOnUnlock=true) override;

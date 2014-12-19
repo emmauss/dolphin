@@ -17,7 +17,6 @@
 #define BACKEND_ALSA        "ALSA"
 #define BACKEND_AOSOUND     "AOSound"
 #define BACKEND_COREAUDIO   "CoreAudio"
-#define BACKEND_DIRECTSOUND "DSound"
 #define BACKEND_OPENAL      "OpenAL"
 #define BACKEND_PULSEAUDIO  "Pulse"
 #define BACKEND_XAUDIO2     "XAudio2"
@@ -33,7 +32,7 @@ struct SConfig : NonCopyable
 	// name of the last used filename
 	std::string m_LastFilename;
 
-	// gcm folder
+	// ISO folder
 	std::vector<std::string> m_ISOFolder;
 	bool m_RecursiveISOFolder;
 
@@ -64,9 +63,15 @@ struct SConfig : NonCopyable
 	bool m_ListPal;
 	bool m_ListUsa;
 	bool m_ListJap;
+	bool m_ListAustralia;
 	bool m_ListFrance;
+	bool m_ListGermany;
+	bool m_ListInternational;
 	bool m_ListItaly;
 	bool m_ListKorea;
+	bool m_ListNetherlands;
+	bool m_ListRussia;
+	bool m_ListSpain;
 	bool m_ListTaiwan;
 	bool m_ListUnknown;
 	int m_ListSort;
@@ -87,8 +92,11 @@ struct SConfig : NonCopyable
 	std::string m_WirelessMac;
 	bool m_PauseMovie;
 	bool m_ShowLag;
+	bool m_ShowFrameCount;
 	std::string m_strMovieAuthor;
 	unsigned int m_FrameSkip;
+	bool m_DumpFrames;
+	bool m_ShowInputDisplay;
 
 	// DSP settings
 	bool m_DSPEnableJIT;
@@ -99,13 +107,14 @@ struct SConfig : NonCopyable
 
 	// Input settings
 	bool m_BackgroundInput;
+	bool m_GameCubeAdapter;
 
 	SysConf* m_SYSCONF;
 
-	// save settings
+	// Save settings
 	void SaveSettings();
 
-	// load settings
+	// Load settings
 	void LoadSettings();
 
 	// Return the permanent and somewhat globally used instance of this struct

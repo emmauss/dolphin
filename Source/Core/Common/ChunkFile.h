@@ -13,6 +13,7 @@
 // - Zero backwards/forwards compatibility
 // - Serialization code for anything complex has to be manually written.
 
+#include <array>
 #include <cstddef>
 #include <deque>
 #include <list>
@@ -23,8 +24,9 @@
 #include <utility>
 #include <vector>
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/FileUtil.h"
+#include "Common/Flag.h"
 
 // ewww
 #if _LIBCPP_VERSION
@@ -158,17 +160,35 @@ public:
 		Do(x.second);
 	}
 
+	template <typename T, std::size_t N>
+	void DoArray(std::array<T,N>& x)
+	{
+		DoArray(x.data(), (u32)x.size());
+	}
+
 	template <typename T>
 	void DoArray(T* x, u32 count)
 	{
-		for (u32 i = 0; i != count; ++i)
-			Do(x[i]);
+		static_assert(IsTriviallyCopyable(T), "Only sane for trivially copyable types");
+		DoVoid(x, count * sizeof(T));
+	}
+
+	void Do(Common::Flag& flag)
+	{
+		bool s = flag.IsSet();
+		Do(s);
+		if (mode == MODE_READ)
+			flag.Set(s);
 	}
 
 	template <typename T>
 	void Do(T& x)
 	{
 		static_assert(IsTriviallyCopyable(T), "Only sane for trivially copyable types");
+		// Note:
+		// Usually we can just use x = **ptr, etc.  However, this doesn't work
+		// for unions containing BitFields (long story, stupid language rules)
+		// or arrays.  This will get optimized anyway.
 		DoVoid((void*)&x, sizeof(x));
 	}
 
@@ -276,41 +296,35 @@ private:
 			Do(elem);
 	}
 
-	__forceinline void DoByte(u8& x)
+	__forceinline
+	void DoVoid(void *data, u32 size)
 	{
 		switch (mode)
 		{
 		case MODE_READ:
-			x = **ptr;
+			memcpy(data, *ptr, size);
 			break;
 
 		case MODE_WRITE:
-			**ptr = x;
+			memcpy(*ptr, data, size);
 			break;
 
 		case MODE_MEASURE:
 			break;
 
 		case MODE_VERIFY:
-			_dbg_assert_msg_(COMMON, (x == **ptr),
-				"Savestate verification failure: %d (0x%X) (at %p) != %d (0x%X) (at %p).\n",
-					x, x, &x, **ptr, **ptr, *ptr);
-			break;
-
-		default:
+			_dbg_assert_msg_(COMMON, !memcmp(data, *ptr, size),
+				"Savestate verification failure: buf %p != %p (size %u).\n",
+					data, *ptr, size);
 			break;
 		}
 
-		++(*ptr);
-	}
-
-	void DoVoid(void *data, u32 size)
-	{
-		for (u32 i = 0; i != size; ++i)
-			DoByte(reinterpret_cast<u8*>(data)[i]);
+		*ptr += size;
 	}
 };
 
+// NOTE: this class is only used in DolphinWX/ISOFile.cpp for caching loaded
+// ISO data. It will be removed when DolphinWX is, so please don't use it.
 class CChunkFileReader
 {
 public:

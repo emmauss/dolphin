@@ -4,7 +4,7 @@
 
 #include "VideoCommon/VideoCommon.h"
 
-inline bool addrRangesOverlap(u32 aLower, u32 aUpper, u32 bLower, u32 bUpper)
+inline bool AddressRangesOverlap(u32 aLower, u32 aUpper, u32 bLower, u32 bUpper)
 {
 	return !((aLower >= bUpper) || (bLower >= aUpper));
 }
@@ -14,7 +14,7 @@ struct XFBSourceBase
 	virtual ~XFBSourceBase() {}
 
 	virtual void Draw(const MathUtil::Rectangle<int> &sourcerc,
-		const MathUtil::Rectangle<float> &drawrc) const = 0;
+		const MathUtil::Rectangle<float> &drawrc) const {};
 
 	virtual void DecodeToTexture(u32 xfbAddr, u32 fbWidth, u32 fbHeight) = 0;
 
@@ -45,7 +45,7 @@ public:
 	virtual ~FramebufferManagerBase();
 
 	static void CopyToXFB(u32 xfbAddr, u32 fbWidth, u32 fbHeight, const EFBRectangle& sourceRc,float Gamma);
-	static const XFBSourceBase* const* GetXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32 &xfbCount);
+	static const XFBSourceBase* const* GetXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32* xfbCount);
 
 	static void SetLastXfbWidth(unsigned int width) { s_last_xfb_width = width; }
 	static void SetLastXfbHeight(unsigned int height) { s_last_xfb_height = height; }
@@ -54,6 +54,8 @@ public:
 
 	static int ScaleToVirtualXfbWidth(int x, unsigned int backbuffer_width);
 	static int ScaleToVirtualXfbHeight(int y, unsigned int backbuffer_height);
+
+	static unsigned int GetEFBLayers() { return m_EFBLayers; }
 
 protected:
 	struct VirtualXFB
@@ -70,6 +72,8 @@ protected:
 
 	typedef std::list<VirtualXFB> VirtualXFBListType;
 
+	static unsigned int m_EFBLayers;
+
 private:
 	virtual XFBSourceBase* CreateXFBSource(unsigned int target_width, unsigned int target_height) = 0;
 	// TODO: figure out why OGL is different for this guy
@@ -83,8 +87,8 @@ private:
 	virtual void CopyToRealXFB(u32 xfbAddr, u32 fbWidth, u32 fbHeight, const EFBRectangle& sourceRc,float Gamma = 1.0f) = 0;
 	static void CopyToVirtualXFB(u32 xfbAddr, u32 fbWidth, u32 fbHeight, const EFBRectangle& sourceRc,float Gamma = 1.0f);
 
-	static const XFBSourceBase* const* GetRealXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32 &xfbCount);
-	static const XFBSourceBase* const* GetVirtualXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32 &xfbCount);
+	static const XFBSourceBase* const* GetRealXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32* xfbCount);
+	static const XFBSourceBase* const* GetVirtualXFBSource(u32 xfbAddr, u32 fbWidth, u32 fbHeight, u32* xfbCount);
 
 	static XFBSourceBase *m_realXFBSource; // Only used in Real XFB mode
 	static VirtualXFBListType m_virtualXFBList; // Only used in Virtual XFB mode

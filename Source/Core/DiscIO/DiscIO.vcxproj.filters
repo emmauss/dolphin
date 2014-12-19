@@ -33,9 +33,6 @@
     <ClCompile Include="BannerLoaderWii.cpp">
       <Filter>FileHandler</Filter>
     </ClCompile>
-    <ClCompile Include="FileHandlerARC.cpp">
-      <Filter>FileHandler</Filter>
-    </ClCompile>
     <ClCompile Include="Filesystem.cpp">
       <Filter>FileSystem</Filter>
     </ClCompile>
@@ -87,7 +84,6 @@
     <ClCompile Include="VolumeWiiCrypted.cpp">
       <Filter>Volume</Filter>
     </ClCompile>
-    <ClCompile Include="stdafx.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DiscScrubber.h">
@@ -100,9 +96,6 @@
       <Filter>FileHandler</Filter>
     </ClInclude>
     <ClInclude Include="BannerLoaderGC.h">
-      <Filter>FileHandler</Filter>
-    </ClInclude>
-    <ClInclude Include="FileHandlerARC.h">
       <Filter>FileHandler</Filter>
     </ClInclude>
     <ClInclude Include="Filesystem.h">
@@ -156,7 +149,6 @@
     <ClInclude Include="VolumeWiiCrypted.h">
       <Filter>Volume</Filter>
     </ClInclude>
-    <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />

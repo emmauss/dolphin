@@ -2,20 +2,23 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
+#include <mutex>
+#include <thread>
+
 #include "Common/Atomic.h"
 #include "Common/ChunkFile.h"
-#include "Common/Common.h"
 #include "Common/CommonPaths.h"
+#include "Common/CommonTypes.h"
 #include "Common/CPUDetect.h"
 #include "Common/Event.h"
 #include "Common/IniFile.h"
-#include "Common/StdMutex.h"
-#include "Common/StdThread.h"
 #include "Common/Logging/LogManager.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/Host.h"
+#include "Core/Movie.h"
+#include "Core/NetPlayProto.h"
 #include "Core/DSP/DSPCaptureLogger.h"
 #include "Core/DSP/DSPCore.h"
 #include "Core/DSP/DSPDisassembler.h"
@@ -30,7 +33,6 @@
 #include "Core/HW/DSPLLE/DSPLLEGlobals.h"
 #include "Core/HW/DSPLLE/DSPSymbols.h"
 
-
 DSPLLE::DSPLLE()
 {
 	m_bIsRunning = false;
@@ -39,6 +41,7 @@ DSPLLE::DSPLLE()
 
 static Common::Event dspEvent;
 static Common::Event ppcEvent;
+static bool requestDisableThread;
 
 void DSPLLE::DoState(PointerWrap &p)
 {
@@ -159,7 +162,10 @@ static bool FillDSPInitOptions(DSPInitOptions* opts)
 bool DSPLLE::Initialize(bool bWii, bool bDSPThread)
 {
 	m_bWii = bWii;
-	m_bDSPThread = bDSPThread;
+	m_bDSPThread = true;
+	if (NetPlay::IsNetPlayRunning() || Movie::IsMovieActive() || Core::g_want_determinism || !bDSPThread)
+		m_bDSPThread = false;
+	requestDisableThread = false;
 
 	DSPInitOptions opts;
 	if (!FillDSPInitOptions(&opts))
@@ -167,7 +173,8 @@ bool DSPLLE::Initialize(bool bWii, bool bDSPThread)
 	if (!DSPCore_Init(opts))
 		return false;
 
-	g_dsp.cpu_ram = Memory::GetPointer(0);
+	// DSPLLE directly accesses the fastmem arena.
+	g_dsp.cpu_ram = Memory::base;
 	DSPCore_Reset();
 
 	m_bIsRunning = true;
@@ -207,6 +214,13 @@ u16 DSPLLE::DSP_WriteControlRegister(u16 _uFlag)
 	// and immediately process it, if it has.
 	if (_uFlag & 2)
 	{
+		if (m_bDSPThread)
+		{
+			// External interrupt pending: this is the zelda ucode.
+			// Disable the DSP thread because there is no performance gain.
+			requestDisableThread = true;
+		}
+
 		if (!m_bDSPThread)
 		{
 			DSPCore_CheckExternalInterrupt();
@@ -303,6 +317,17 @@ void DSPLLE::DSP_Update(int cycles)
 		soundStream->Update();
 	}
 */
+	if (m_bDSPThread)
+	{
+		if (requestDisableThread || NetPlay::IsNetPlayRunning() || Movie::IsMovieActive() || Core::g_want_determinism)
+		{
+			DSP_StopSoundStream();
+			m_bDSPThread = false;
+			requestDisableThread = false;
+			SConfig::GetInstance().m_LocalCoreStartupParameter.bDSPThread = false;
+		}
+	}
+
 	// If we're not on a thread, run cycles here.
 	if (!m_bDSPThread)
 	{

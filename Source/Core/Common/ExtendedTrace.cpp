@@ -19,7 +19,6 @@
 
 #include "Common/ExtendedTrace.h"
 #include "Common/StringUtil.h"
-using namespace std;
 
 #include <tchar.h>
 #include <ImageHlp.h>
@@ -93,7 +92,8 @@ static void InitSymbolPath( PSTR lpszSymbolPath, PCSTR lpszIniPath )
 }
 
 // Uninitialize the loaded symbol files
-BOOL UninitSymInfo() {
+BOOL UninitSymInfo()
+{
 	return SymCleanup( GetCurrentProcess() );
 }
 

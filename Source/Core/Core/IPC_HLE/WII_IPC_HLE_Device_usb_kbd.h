@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Core/IPC_HLE/WII_IPC_HLE_Device.h"
+
 class CWII_IPC_HLE_Device_usb_kbd : public IWII_IPC_HLE_Device
 {
 public:
@@ -33,7 +35,8 @@ private:
 		u8 Unk2;
 		u8 PressedKeys[6];
 
-		SMessageData(u32 _MsgType, u8 _Modifiers, u8 *_PressedKeys) {
+		SMessageData(u32 _MsgType, u8 _Modifiers, u8 *_PressedKeys)
+		{
 			MsgType = Common::swap32(_MsgType);
 			Unk1 = 0; // swapped
 			Modifiers = _Modifiers;

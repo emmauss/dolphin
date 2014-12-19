@@ -27,8 +27,6 @@
 #include "DolphinWX/LogWindow.h"
 #include "DolphinWX/WxUtils.h"
 
-class wxWindow;
-
 LogConfigWindow::LogConfigWindow(wxWindow* parent, CLogWindow *log_window, wxWindowID id)
 	: wxPanel(parent, id, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL, _("Log Configuration"))
 	, m_LogWindow(log_window), enableAll(true)
@@ -156,7 +154,7 @@ void LogConfigWindow::LoadSettings()
 	for (int i = 0; i < LogTypes::NUMBER_OF_LOGS; ++i)
 	{
 		bool log_enabled;
-		ini.GetOrCreateSection("Logs")->Get(m_LogManager->GetShortName((LogTypes::LOG_TYPE)i), &log_enabled, true);
+		ini.GetOrCreateSection("Logs")->Get(m_LogManager->GetShortName((LogTypes::LOG_TYPE)i), &log_enabled, false);
 
 		if (log_enabled)
 			enableAll = false;
@@ -305,3 +303,4 @@ void LogConfigWindow::OnLogCheck(wxCommandEvent& event)
 	int i = event.GetInt();
 	ToggleLog(i, m_checks->IsChecked(i));
 }
+

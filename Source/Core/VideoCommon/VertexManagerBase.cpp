@@ -1,7 +1,8 @@
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 
 #include "VideoCommon/BPStructs.h"
 #include "VideoCommon/Debugger.h"
+#include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/IndexGenerator.h"
 #include "VideoCommon/MainBase.h"
 #include "VideoCommon/NativeVertexFormat.h"
@@ -51,9 +52,10 @@ u32 VertexManager::GetRemainingSize()
 	return (u32)(s_pEndBufferPointer - s_pCurBufferPointer);
 }
 
-void VertexManager::PrepareForAdditionalData(int primitive, u32 count, u32 stride)
+DataReader VertexManager::PrepareForAdditionalData(int primitive, u32 count, u32 stride)
 {
-	u32 const needed_vertex_bytes = count * stride;
+	// The SSE vertex loader can write up to 4 bytes past the end
+	u32 const needed_vertex_bytes = count * stride + 4;
 
 	// We can't merge different kinds of primitives, so we have to flush here
 	if (current_primitive_type != primitive_from_gx[primitive])
@@ -82,6 +84,13 @@ void VertexManager::PrepareForAdditionalData(int primitive, u32 count, u32 strid
 		g_vertex_manager->ResetBuffer(stride);
 		IsFlushed = false;
 	}
+
+	return DataReader(s_pCurBufferPointer, s_pEndBufferPointer);
+}
+
+void VertexManager::FlushData(u32 count, u32 stride)
+{
+	s_pCurBufferPointer += count * stride;
 }
 
 u32 VertexManager::GetRemainingIndices(int primitive)
@@ -144,7 +153,8 @@ u32 VertexManager::GetRemainingIndices(int primitive)
 
 void VertexManager::Flush()
 {
-	if (IsFlushed) return;
+	if (IsFlushed)
+		return;
 
 	// loading a state will invalidate BP, so check for it
 	g_video_backend->CheckInvalidState();
@@ -179,39 +189,36 @@ void VertexManager::Flush()
 		(int)bpmem.genMode.numtexgens, (u32)bpmem.dstalpha.enable, (bpmem.alpha_test.hex>>16)&0xff);
 #endif
 
-	u32 usedtextures = 0;
+	BitSet32 usedtextures;
 	for (u32 i = 0; i < bpmem.genMode.numtevstages + 1u; ++i)
 		if (bpmem.tevorders[i / 2].getEnable(i & 1))
-			usedtextures |= 1 << bpmem.tevorders[i/2].getTexMap(i & 1);
+			usedtextures[bpmem.tevorders[i/2].getTexMap(i & 1)] = true;
 
 	if (bpmem.genMode.numindstages > 0)
 		for (unsigned int i = 0; i < bpmem.genMode.numtevstages + 1u; ++i)
 			if (bpmem.tevind[i].IsActive() && bpmem.tevind[i].bt < bpmem.genMode.numindstages)
-				usedtextures |= 1 << bpmem.tevindref.getTexMap(bpmem.tevind[i].bt);
+				usedtextures[bpmem.tevindref.getTexMap(bpmem.tevind[i].bt)] = true;
 
-	for (unsigned int i = 0; i < 8; i++)
+	for (unsigned int i : usedtextures)
 	{
-		if (usedtextures & (1 << i))
-		{
-			g_renderer->SetSamplerState(i & 3, i >> 2);
-			const FourTexUnits &tex = bpmem.tex[i >> 2];
-			const TextureCache::TCacheEntryBase* tentry = TextureCache::Load(i,
-				(tex.texImage3[i&3].image_base/* & 0x1FFFFF*/) << 5,
-				tex.texImage0[i&3].width + 1, tex.texImage0[i&3].height + 1,
-				tex.texImage0[i&3].format, tex.texTlut[i&3].tmem_offset<<9,
-				tex.texTlut[i&3].tlut_format,
-				((tex.texMode0[i&3].min_filter & 3) != 0),
-				(tex.texMode1[i&3].max_lod + 0xf) / 0x10,
-				(tex.texImage1[i&3].image_type != 0));
+		g_renderer->SetSamplerState(i & 3, i >> 2);
+		const FourTexUnits &tex = bpmem.tex[i >> 2];
+		const TextureCache::TCacheEntryBase* tentry = TextureCache::Load(i,
+			(tex.texImage3[i&3].image_base/* & 0x1FFFFF*/) << 5,
+			tex.texImage0[i&3].width + 1, tex.texImage0[i&3].height + 1,
+			tex.texImage0[i&3].format, tex.texTlut[i&3].tmem_offset<<9,
+			tex.texTlut[i&3].tlut_format,
+			((tex.texMode0[i&3].min_filter & 3) != 0),
+			(tex.texMode1[i&3].max_lod + 0xf) / 0x10,
+			(tex.texImage1[i&3].image_type != 0));
 
-			if (tentry)
-			{
-				// 0s are probably for no manual wrapping needed.
-				PixelShaderManager::SetTexDims(i, tentry->native_width, tentry->native_height, 0, 0);
-			}
-			else
-				ERROR_LOG(VIDEO, "error loading texture");
+		if (tentry)
+		{
+			// 0s are probably for no manual wrapping needed.
+			PixelShaderManager::SetTexDims(i, tentry->native_width, tentry->native_height, 0, 0);
 		}
+		else
+			ERROR_LOG(VIDEO, "error loading texture");
 	}
 
 	// set global constants
@@ -230,6 +237,9 @@ void VertexManager::Flush()
 		g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
 
 	GFX_DEBUGGER_PAUSE_AT(NEXT_FLUSH, true);
+
+	if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens)
+		ERROR_LOG(VIDEO, "xf.numtexgens (%d) does not match bp.numtexgens (%d). Error in command stream.", xfmem.numTexGen.numTexGens, bpmem.genMode.numtexgens.Value());
 
 	IsFlushed = true;
 }

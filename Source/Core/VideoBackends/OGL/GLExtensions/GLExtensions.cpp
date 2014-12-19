@@ -1536,6 +1536,12 @@ const GLFunc gl_function_array[] =
 	GLFUNC_REQUIRES(glDrawRangeElementsBaseVertex,     "GL_ARB_draw_elements_base_vertex"),
 	GLFUNC_REQUIRES(glMultiDrawElementsBaseVertex,     "GL_ARB_draw_elements_base_vertex"),
 
+	// EXT_draw_elements_base_vertex
+	GLFUNC_SUFFIX(glDrawElementsBaseVertex,          EXT, "GL_EXT_draw_elements_base_vertex !GL_ARB_draw_elements_base_vertex"),
+	GLFUNC_SUFFIX(glDrawElementsInstancedBaseVertex, EXT, "GL_EXT_draw_elements_base_vertex VERSION_GLES3 !GL_ARB_draw_elements_base_vertex"),
+	GLFUNC_SUFFIX(glDrawRangeElementsBaseVertex,     EXT, "GL_EXT_draw_elements_base_vertex VERSION_GLES3 !GL_ARB_draw_elements_base_vertex"),
+	GLFUNC_SUFFIX(glMultiDrawElementsBaseVertex,     EXT, "GL_EXT_draw_elements_base_vertex GL_EXT_multi_draw_arrays !GL_ARB_draw_elements_base_vertex"),
+
 	// ARB_sample_shading
 	GLFUNC_REQUIRES(glMinSampleShadingARB, "GL_ARB_sample_shading"),
 
@@ -1570,6 +1576,9 @@ const GLFunc gl_function_array[] =
 	// ARB_buffer_storage
 	GLFUNC_REQUIRES(glBufferStorage,         "GL_ARB_buffer_storage"),
 	GLFUNC_REQUIRES(glNamedBufferStorageEXT, "GL_ARB_buffer_storage GL_EXT_direct_state_access"),
+
+	// EXT_geometry_shader
+	GLFUNC_SUFFIX(glFramebufferTexture, EXT, "GL_EXT_geometry_shader !VERSION_3_2"),
 };
 
 namespace GLExtensions
@@ -1627,6 +1636,122 @@ namespace GLExtensions
 			switch (_GLVersion)
 			{
 				default:
+				case 450:
+				{
+					std::string gl450exts[] = {
+						"GL_ARB_ES3_1_compatibility",
+						"GL_ARB_clip_control",
+						"GL_ARB_conditional_render_inverted",
+						"GL_ARB_cull_distance",
+						"GL_ARB_derivative_control",
+						"GL_ARB_direct_state_access",
+						"GL_ARB_get_texture_sub_image",
+						"GL_ARB_robustness",
+						"GL_ARB_shader_texture_image_samples",
+						"GL_ARB_texture_barrier",
+						"VERSION_4_5",
+					};
+					for (auto it : gl450exts)
+						m_extension_list[it] = true;
+				}
+				case 440:
+				{
+					std::string gl440exts[] = {
+						"GL_ARB_buffer_storage",
+						"GL_ARB_clear_texture",
+						"GL_ARB_enhanced_layouts",
+						"GL_ARB_multi_bind",
+						"GL_ARB_query_buffer_object",
+						"GL_ARB_texture_mirror_clamp_to_edge",
+						"GL_ARB_texture_stencil8",
+						"GL_ARB_vertex_type_10f_11f_11f_rev",
+						"VERSION_4_4",
+					};
+					for (auto it : gl440exts)
+						m_extension_list[it] = true;
+				}
+				case 430:
+				{
+					std::string gl430exts[] = {
+						"GL_ARB_ES3_compatibility",
+						"GL_ARB_arrays_of_arrays",
+						"GL_ARB_clear_buffer_object",
+						"GL_ARB_compute_shader",
+						"GL_ARB_copy_image",
+						"GL_ARB_explicit_uniform_location",
+						"GL_ARB_fragment_layer_viewport",
+						"GL_ARB_framebuffer_no_attachments",
+						"GL_ARB_internalformat_query2",
+						"GL_ARB_invalidate_subdata",
+						"GL_ARB_multi_draw_indirect",
+						"GL_ARB_program_interface_query",
+						"GL_ARB_shader_image_size",
+						"GL_ARB_shader_storage_buffer_object",
+						"GL_ARB_stencil_texturing",
+						"GL_ARB_texture_buffer_range",
+						"GL_ARB_texture_query_levels",
+						"GL_ARB_texture_storage_multisample",
+						"GL_ARB_texture_view",
+						"GL_ARB_vertex_attrib_binding",
+						"VERSION_4_3",
+					};
+					for (auto it : gl430exts)
+						m_extension_list[it] = true;
+				}
+				case 420:
+				{
+					std::string gl420exts[] = {
+						"GL_ARB_base_instance",
+						"GL_ARB_compressed_texture_pixel_storage",
+						"GL_ARB_conservative_depth",
+						"GL_ARB_internalformat_query",
+						"GL_ARB_map_buffer_alignment",
+						"GL_ARB_shader_atomic_counters",
+						"GL_ARB_shader_image_load_store",
+						"GL_ARB_shading_language_420pack",
+						"GL_ARB_shading_language_packing",
+						"GL_ARB_texture_compression_BPTC",
+						"GL_ARB_texture_storage",
+						"GL_ARB_transform_feedback_instanced",
+						"VERSION_4_2",
+					};
+					for (auto it : gl420exts)
+						m_extension_list[it] = true;
+				}
+				case 410:
+				{
+					std::string gl410exts[] = {
+						"GL_ARB_ES2_compatibility",
+						"GL_ARB_get_program_binary",
+						"GL_ARB_separate_shader_objects",
+						"GL_ARB_shader_precision",
+						"GL_ARB_vertex_attrib_64_bit",
+						"GL_ARB_viewport_array",
+						"VERSION_4_1",
+					};
+					for (auto it : gl410exts)
+						m_extension_list[it] = true;
+				}
+				case 400:
+				{
+					std::string gl400exts[] = {
+						"GL_ARB_draw_indirect",
+						"GL_ARB_gpu_shader5",
+						"GL_ARB_gpu_shader_fp64",
+						"GL_ARB_sample_shading",
+						"GL_ARB_shader_subroutine",
+						"GL_ARB_tessellation_shader",
+						"GL_ARB_texture_buffer_object_rgb32",
+						"GL_ARB_texture_cube_map_array",
+						"GL_ARB_texture_gather",
+						"GL_ARB_texture_query_lod",
+						"GL_ARB_transform_feedback2",
+						"GL_ARB_transform_feedback3",
+						"VERSION_4_0",
+					};
+					for (auto it : gl400exts)
+						m_extension_list[it] = true;
+				}
 				case 330:
 				{
 					std::string gl330exts[] = {
@@ -1776,17 +1901,20 @@ namespace GLExtensions
 		// Grab a few functions for initial checking
 		// We need them to grab the extension list
 		// Also to check if there is an error grabbing the version
-		// If it fails then the user's drivers don't support GL 3.0
 		if (GetFuncAddress ("glGetIntegerv", (void**)&glGetIntegerv) == nullptr)
 			return false;
 		if (GetFuncAddress("glGetString", (void**)&glGetString) == nullptr)
-			return false;
-		if (GetFuncAddress("glGetStringi", (void**)&glGetStringi) == nullptr)
 			return false;
 		if (GetFuncAddress("glGetError", (void**)&glGetError) == nullptr)
 			return false;
 
 		InitVersion();
+
+		// We need to use glGetStringi to get the extension list
+		// if we are using GLES3 or a GL version greater than 2.1
+		if (_GLVersion > 210 && GetFuncAddress("glGetStringi", (void**)&glGetStringi) == nullptr)
+			return false;
+
 		InitExtensionList();
 
 		return InitFunctionPointers();

@@ -2,7 +2,7 @@
 // Licensed under GPLv2
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
+#include "Common/CommonTypes.h"
 #include "Common/CPUDetect.h"
 
 #include "Core/PowerPC/Jit64/Jit.h"
@@ -14,134 +14,211 @@ using namespace Gen;
 // TODO: Add peephole optimizations for multiple consecutive lfd/lfs/stfd/stfs since they are so common,
 // and pshufb could help a lot.
 
-void Jit64::lfs(UGeckoInstruction inst)
+void Jit64::lfXXX(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreFloatingOff);
+	bool indexed = inst.OPCD == 31;
+	bool update = indexed ? !!(inst.SUBOP10 & 0x20) : !!(inst.OPCD & 1);
+	bool single = indexed ? !(inst.SUBOP10 & 0x40) : !(inst.OPCD & 2);
+	update &= indexed || inst.SIMM_16;
 
 	int d = inst.RD;
 	int a = inst.RA;
-	FALLBACK_IF(!a);
+	int b = inst.RB;
 
-	s32 offset = (s32)(s16)inst.SIMM_16;
+	FALLBACK_IF(!indexed && !a);
 
-	SafeLoadToReg(EAX, gpr.R(a), 32, offset, RegistersInUse(), false);
+	gpr.BindToRegister(a, true, update);
 
+	s32 offset = 0;
+	OpArg addr = gpr.R(a);
+	if (update && js.memcheck)
+	{
+		addr = R(RSCRATCH2);
+		MOV(32, addr, gpr.R(a));
+	}
+	if (indexed)
+	{
+		if (update)
+		{
+			ADD(32, addr, gpr.R(b));
+		}
+		else
+		{
+			addr = R(RSCRATCH);
+			if (a && gpr.R(a).IsSimpleReg() && gpr.R(b).IsSimpleReg())
+				LEA(32, RSCRATCH, MComplex(gpr.RX(a), gpr.RX(b), SCALE_1, 0));
+			else
+			{
+				MOV(32, addr, gpr.R(b));
+				if (a)
+					ADD(32, addr, gpr.R(a));
+			}
+		}
+	}
+	else
+	{
+		if (update)
+			ADD(32, addr, Imm32((s32)(s16)inst.SIMM_16));
+		else
+			offset = (s16)inst.SIMM_16;
+	}
+
+	BitSet32 registersInUse = CallerSavedRegistersInUse();
+	if (update && js.memcheck)
+		registersInUse[RSCRATCH2] = true;
+	SafeLoadToReg(RSCRATCH, addr, single ? 32 : 64, offset, registersInUse, false);
 	fpr.Lock(d);
-	fpr.BindToRegister(d, js.memcheck);
+	fpr.BindToRegister(d, js.memcheck || !single);
 
-	MEMCHECK_START
-	ConvertSingleToDouble(fpr.RX(d), EAX, true);
+	MEMCHECK_START(false)
+	if (single)
+	{
+		ConvertSingleToDouble(fpr.RX(d), RSCRATCH, true);
+	}
+	else
+	{
+		MOVQ_xmm(XMM0, R(RSCRATCH));
+		MOVSD(fpr.RX(d), R(XMM0));
+	}
+	if (update && js.memcheck)
+		MOV(32, gpr.R(a), addr);
 	MEMCHECK_END
-
 	fpr.UnlockAll();
+	gpr.UnlockAll();
 }
 
-
-void Jit64::lfd(UGeckoInstruction inst)
+void Jit64::stfXXX(UGeckoInstruction inst)
 {
 	INSTRUCTION_START
 	JITDISABLE(bJITLoadStoreFloatingOff);
-	FALLBACK_IF(!inst.RA);
-
-	int d = inst.RD;
-	int a = inst.RA;
-
-	s32 offset = (s32)(s16)inst.SIMM_16;
-
-	SafeLoadToReg(RAX, gpr.R(a), 64, offset, RegistersInUse(), false);
-
-	fpr.Lock(d);
-	fpr.BindToRegister(d, true);
-
-	MEMCHECK_START
-	MOVQ_xmm(XMM0, R(RAX));
-	MOVSD(fpr.RX(d), R(XMM0));
-	MEMCHECK_END
-
-	fpr.UnlockAll();
-}
-
-
-void Jit64::stfd(UGeckoInstruction inst)
-{
-	INSTRUCTION_START
-	JITDISABLE(bJITLoadStoreFloatingOff);
-	FALLBACK_IF(!inst.RA);
+	bool indexed = inst.OPCD == 31;
+	bool update = indexed ? !!(inst.SUBOP10&0x20) : !!(inst.OPCD&1);
+	bool single = indexed ? !(inst.SUBOP10&0x40) : !(inst.OPCD&2);
+	update &= indexed || inst.SIMM_16;
 
 	int s = inst.RS;
 	int a = inst.RA;
+	int b = inst.RB;
+	s32 imm = (s16)inst.SIMM_16;
+	int accessSize = single ? 32 : 64;
 
-	gpr.FlushLockX(ABI_PARAM1);
-	MOV(32, R(ABI_PARAM1), gpr.R(a));
+	FALLBACK_IF(update && js.memcheck && a == b);
+
+	if (single)
+	{
+		if (jit->js.op->fprIsStoreSafe[s])
+		{
+			CVTSD2SS(XMM0, fpr.R(s));
+		}
+		else
+		{
+			fpr.BindToRegister(s, true, false);
+			ConvertDoubleToSingle(XMM0, fpr.RX(s));
+		}
+		MOVD_xmm(R(RSCRATCH), XMM0);
+	}
+	else
+	{
+		if (fpr.R(s).IsSimpleReg())
+			MOVQ_xmm(R(RSCRATCH), fpr.RX(s));
+		else
+			MOV(64, R(RSCRATCH), fpr.R(s));
+	}
+
+	if (!indexed && (!a || gpr.R(a).IsImm()))
+	{
+		u32 addr = (a ? (u32)gpr.R(a).offset : 0) + imm;
+		bool exception = WriteToConstAddress(accessSize, R(RSCRATCH), addr, CallerSavedRegistersInUse());
+
+		if (update)
+		{
+			if (!js.memcheck || !exception)
+			{
+				gpr.SetImmediate32(a, addr);
+			}
+			else
+			{
+				gpr.KillImmediate(a, true, true);
+				MEMCHECK_START(false)
+				ADD(32, gpr.R(a), Imm32((u32)imm));
+				MEMCHECK_END
+			}
+		}
+		fpr.UnlockAll();
+		gpr.UnlockAll();
+		return;
+	}
+
+	s32 offset = 0;
+	if (indexed)
+	{
+		if (update)
+		{
+			gpr.BindToRegister(a, true, true);
+			ADD(32, gpr.R(a), gpr.R(b));
+			MOV(32, R(RSCRATCH2), gpr.R(a));
+		}
+		else
+		{
+			if (a && gpr.R(a).IsSimpleReg() && gpr.R(b).IsSimpleReg())
+				LEA(32, RSCRATCH2, MComplex(gpr.RX(a), gpr.RX(b), SCALE_1, 0));
+			else
+			{
+				MOV(32, R(RSCRATCH2), gpr.R(b));
+				if (a)
+					ADD(32, R(RSCRATCH2), gpr.R(a));
+			}
+		}
+	}
+	else
+	{
+		if (update)
+		{
+			gpr.BindToRegister(a, true, true);
+			ADD(32, gpr.R(a), Imm32(imm));
+		}
+		else
+		{
+			offset = imm;
+		}
+		MOV(32, R(RSCRATCH2), gpr.R(a));
+	}
+
+	SafeWriteRegToReg(RSCRATCH, RSCRATCH2, accessSize, offset, CallerSavedRegistersInUse());
+
+	if (js.memcheck && update)
+	{
+		// revert the address change if an exception occurred
+		MEMCHECK_START(true)
+		SUB(32, gpr.R(a), indexed ? gpr.R(b) : Imm32(imm));
+		MEMCHECK_END
+	}
+
+	fpr.UnlockAll();
+	gpr.UnlockAll();
+	gpr.UnlockAllX();
+}
+
+// This one is a little bit weird; it stores the low 32 bits of a double without converting it
+void Jit64::stfiwx(UGeckoInstruction inst)
+{
+	INSTRUCTION_START
+	JITDISABLE(bJITLoadStoreFloatingOff);
+
+	int s = inst.RS;
+	int a = inst.RA;
+	int b = inst.RB;
+
+	MOV(32, R(RSCRATCH2), gpr.R(b));
+	if (a)
+		ADD(32, R(RSCRATCH2), gpr.R(a));
 
 	if (fpr.R(s).IsSimpleReg())
-		MOVQ_xmm(R(RAX), fpr.RX(s));
+		MOVD_xmm(R(RSCRATCH), fpr.RX(s));
 	else
-		MOV(64, R(RAX), fpr.R(s));
-
-	s32 offset = (s32)(s16)inst.SIMM_16;
-	SafeWriteRegToReg(RAX, ABI_PARAM1, 64, offset, RegistersInUse());
-
-	gpr.UnlockAllX();
-}
-
-void Jit64::stfs(UGeckoInstruction inst)
-{
-	INSTRUCTION_START
-	JITDISABLE(bJITLoadStoreFloatingOff);
-	FALLBACK_IF(!inst.RA);
-
-	int s = inst.RS;
-	int a = inst.RA;
-	s32 offset = (s32)(s16)inst.SIMM_16;
-
-	fpr.BindToRegister(s, true, false);
-	ConvertDoubleToSingle(XMM0, fpr.RX(s));
-	gpr.FlushLockX(ABI_PARAM1);
-	MOV(32, R(ABI_PARAM1), gpr.R(a));
-	SafeWriteF32ToReg(XMM0, ABI_PARAM1, offset, RegistersInUse());
-	fpr.UnlockAll();
-	gpr.UnlockAllX();
-}
-
-void Jit64::stfsx(UGeckoInstruction inst)
-{
-	INSTRUCTION_START
-	JITDISABLE(bJITLoadStoreFloatingOff);
-
-	gpr.FlushLockX(ABI_PARAM1);
-	MOV(32, R(ABI_PARAM1), gpr.R(inst.RB));
-	if (inst.RA)
-		ADD(32, R(ABI_PARAM1), gpr.R(inst.RA));
-
-	int s = inst.RS;
-	fpr.Lock(s);
-	fpr.BindToRegister(s, true, false);
-	ConvertDoubleToSingle(XMM0, fpr.RX(s));
-	SafeWriteF32ToReg(XMM0, ABI_PARAM1, 0, RegistersInUse());
-	fpr.UnlockAll();
-	gpr.UnlockAllX();
-}
-
-void Jit64::lfsx(UGeckoInstruction inst)
-{
-	INSTRUCTION_START
-	JITDISABLE(bJITLoadStoreFloatingOff);
-
-	MOV(32, R(EAX), gpr.R(inst.RB));
-	if (inst.RA)
-		ADD(32, R(EAX), gpr.R(inst.RA));
-
-	SafeLoadToReg(EAX, R(EAX), 32, 0, RegistersInUse(), false);
-
-	fpr.Lock(inst.RS);
-	fpr.BindToRegister(inst.RS, js.memcheck);
-
-	MEMCHECK_START
-	ConvertSingleToDouble(fpr.RX(inst.RS), EAX, true);
-	MEMCHECK_END
-
-	fpr.UnlockAll();
+		MOV(32, R(RSCRATCH), fpr.R(s));
+	SafeWriteRegToReg(RSCRATCH, RSCRATCH2, 32, 0, CallerSavedRegistersInUse());
 	gpr.UnlockAllX();
 }
