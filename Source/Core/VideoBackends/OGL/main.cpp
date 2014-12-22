@@ -74,7 +74,6 @@ Make AA apply instantly during gameplay if possible
 #include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/PixelEngine.h"
 #include "VideoCommon/PixelShaderManager.h"
-#include "VideoCommon/VertexLoader.h"
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/VideoConfig.h"
@@ -154,7 +153,8 @@ static void InitBackendInfo()
 
 void VideoBackend::ShowConfig(void *_hParent)
 {
-	InitBackendInfo();
+	if (!s_BackendInitialized)
+		InitBackendInfo();
 	Host_ShowVideoConfig(_hParent, GetDisplayName(), "gfx_opengl");
 }
 
