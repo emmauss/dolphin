@@ -134,6 +134,7 @@ EVT_CHOICE(ID_FRAMELIMIT, CConfigMain::CoreSettingsChanged)
 
 EVT_RADIOBOX(ID_CPUENGINE, CConfigMain::CoreSettingsChanged)
 EVT_CHECKBOX(ID_NTSCJ, CConfigMain::CoreSettingsChanged)
+EVT_SLIDER(ID_OVERCLOCK, CConfigMain::CoreSettingsChanged)
 
 
 EVT_RADIOBOX(ID_DSPENGINE, CConfigMain::AudioSettingsChanged)
@@ -327,6 +328,9 @@ void CConfigMain::InitializeGUIValues()
 	SkipIdle->SetValue(startup_params.bSkipIdle);
 	EnableCheats->SetValue(startup_params.bEnableCheats);
 	Framelimit->SetSelection(SConfig::GetInstance().m_Framelimit);
+	int ocFactor = (int)(log2f(SConfig::GetInstance().m_OCFactor) * 25.f + 100.f + 0.5f);
+	OCSlider->SetValue(ocFactor);
+	UpdateCPUClock();
 
 	// General - Advanced
 	for (unsigned int a = 0; a < (sizeof(CPUCores) / sizeof(CPUCore)); ++a)
@@ -496,6 +500,7 @@ void CConfigMain::CreateGUIControls()
 	wxPanel* const AudioPage = new wxPanel(Notebook, ID_AUDIOPAGE);
 	wxPanel* const GamecubePage = new wxPanel(Notebook, ID_GAMECUBEPAGE);
 	wxPanel* const WiiPage = new wxPanel(Notebook, ID_WIIPAGE);
+	wxPanel* const AdvancedPage = new wxPanel(Notebook, ID_ADVANCEDPAGE);
 	PathsPage = new wxPanel(Notebook, ID_PATHSPAGE);
 
 	Notebook->AddPage(GeneralPage, _("General"));
@@ -504,6 +509,7 @@ void CConfigMain::CreateGUIControls()
 	Notebook->AddPage(GamecubePage, _("GameCube"));
 	Notebook->AddPage(WiiPage, _("Wii"));
 	Notebook->AddPage(PathsPage, _("Paths"));
+	Notebook->AddPage(AdvancedPage, _("Advanced"));
 
 	// General page
 	// Core Settings - Basic
@@ -520,6 +526,7 @@ void CConfigMain::CreateGUIControls()
 	wxBoxSizer* sFramelimit = new wxBoxSizer(wxHORIZONTAL);
 	sFramelimit->Add(TEXT_BOX(GeneralPage, _("Framelimit:")), 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT | wxBOTTOM, 5);
 	sFramelimit->Add(Framelimit, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 5);
+
 	wxStaticBoxSizer* const sbBasic = new wxStaticBoxSizer(wxVERTICAL, GeneralPage, _("Basic Settings"));
 	sbBasic->Add(CPUThread, 0, wxALL, 5);
 	sbBasic->Add(SkipIdle, 0, wxALL, 5);
@@ -781,6 +788,30 @@ void CConfigMain::CreateGUIControls()
 	sMain->Add(Notebook, 1, wxEXPAND|wxALL, 5);
 	sMain->Add(CreateButtonSizer(wxOK), 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 5);
 
+	wxStaticBoxSizer* sbCPUOptions = new wxStaticBoxSizer(wxVERTICAL, AdvancedPage, _("CPU Options"));
+	wxBoxSizer* bOverclock = new wxBoxSizer(wxHORIZONTAL);
+	wxBoxSizer* bOverclockDesc = new wxBoxSizer(wxHORIZONTAL);
+	OCSlider = new wxSlider(AdvancedPage, ID_OVERCLOCK, 100, 0, 150, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL);
+	wxStaticText* OCDescription = new wxStaticText(AdvancedPage, wxID_ANY,
+	  _("Higher values can make variable-framerate games\n"
+	    "run at a higher framerate, at the expense of CPU.\n"
+	    "Lower values can make variable-framerate games\n"
+	    "run at a lower framerate, saving CPU.\n\n"
+	    "WARNING: Changing this from the default (100%)\n"
+	    "can and will break games and cause glitches.\n"
+	    "Do so at your own risk. Please do not report\n"
+	    "bugs that occur with a non-default clock.\n"));
+	OCText = new wxStaticText(AdvancedPage, wxID_ANY, "");
+	bOverclock->Add(TEXT_BOX(AdvancedPage, _("CPU Clock Override:")), 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT | wxBOTTOM, 5);
+	bOverclock->Add(OCSlider, 1, wxALL, 5);
+	bOverclock->Add(OCText, 1, wxALL, 5);
+	bOverclockDesc->Add(OCDescription, 1, wxALL, 5);
+	sbCPUOptions->Add(bOverclock);
+	sbCPUOptions->Add(bOverclockDesc);
+	wxBoxSizer* const sAdvancedPage = new wxBoxSizer(wxVERTICAL);
+	sAdvancedPage->Add(sbCPUOptions, 0, wxEXPAND | wxALL, 5);
+	AdvancedPage->SetSizer(sAdvancedPage);
+
 	InitializeGUIValues();
 	InitializeGUITooltips();
 
@@ -802,6 +833,14 @@ void CConfigMain::OnOk(wxCommandEvent& WXUNUSED (event))
 
 	// Save the config. Dolphin crashes too often to only save the settings on closing
 	SConfig::GetInstance().SaveSettings();
+}
+
+void CConfigMain::UpdateCPUClock()
+{
+	bool wii = SConfig::GetInstance().m_LocalCoreStartupParameter.bWii;
+	int percent = (int)(roundf(SConfig::GetInstance().m_OCFactor * 100.f));
+	int clock = (int)(roundf(SConfig::GetInstance().m_OCFactor * (wii ? 729.f : 486.f)));
+	OCText->SetLabel(wxString::Format("%d %% (%d mhz)", percent, clock));
 }
 
 // Core settings
@@ -837,6 +876,11 @@ void CConfigMain::CoreSettingsChanged(wxCommandEvent& event)
 		break;
 	case ID_NTSCJ:
 		startup_params.bForceNTSCJ = _NTSCJ->IsChecked();
+		break;
+	case ID_OVERCLOCK:
+		// Vaguely exponential scaling?
+		SConfig::GetInstance().m_OCFactor = exp2f((OCSlider->GetValue() - 100.f) / 25.f);
+		UpdateCPUClock();
 		break;
 	}
 }
