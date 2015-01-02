@@ -69,6 +69,7 @@ public:
 		ID_GAMECUBEPAGE,
 		ID_WIIPAGE,
 		ID_PATHSPAGE,
+		ID_ADVANCEDPAGE,
 	};
 
 private:
@@ -78,6 +79,7 @@ private:
 		ID_IDLESKIP,
 		ID_ENABLECHEATS,
 		ID_FRAMELIMIT,
+		ID_OVERCLOCK,
 
 		ID_CPUENGINE,
 
@@ -140,6 +142,8 @@ private:
 	wxCheckBox* SkipIdle;
 	wxCheckBox* EnableCheats;
 	wxChoice* Framelimit;
+	wxSlider* OCSlider;
+	wxStaticText* OCText;
 
 	// Advanced
 	wxRadioBox* CPUEngine;
@@ -238,6 +242,7 @@ private:
 	void UpdateGUI();
 	void OnClose(wxCloseEvent& event);
 
+	void UpdateCPUClock();
 	void CoreSettingsChanged(wxCommandEvent& event);
 
 	void DisplaySettingsChanged(wxCommandEvent& event);
