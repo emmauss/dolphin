@@ -20,6 +20,7 @@ GeometryShaderConstants GeometryShaderManager::constants;
 bool GeometryShaderManager::dirty;
 
 static bool s_projection_changed;
+static bool s_viewport_changed;
 
 void GeometryShaderManager::Init()
 {
@@ -52,10 +53,10 @@ void GeometryShaderManager::SetConstants()
 
 		if (xfmem.projection.type == GX_PERSPECTIVE)
 		{
-			float offset = (g_ActiveConfig.iStereoSeparation / 1000.0f) * (g_ActiveConfig.iStereoSeparationPercent / 100.0f);
-			constants.stereoparams[0] = (g_ActiveConfig.bStereoSwapEyes) ? offset : -offset;
-			constants.stereoparams[1] = (g_ActiveConfig.bStereoSwapEyes) ? -offset : offset;
-			constants.stereoparams[2] = (g_ActiveConfig.iStereoConvergence / 10.0f) * (g_ActiveConfig.iStereoConvergencePercent / 100.0f);
+			float offset = (g_ActiveConfig.iStereoDepth / 1000.0f) * (g_ActiveConfig.iStereoDepthPercentage / 100.0f);
+			constants.stereoparams[0] = g_ActiveConfig.bStereoSwapEyes ? offset : -offset;
+			constants.stereoparams[1] = g_ActiveConfig.bStereoSwapEyes ? -offset : offset;
+			constants.stereoparams[2] = g_ActiveConfig.iStereoConvergence * (g_ActiveConfig.iStereoConvergencePercentage / 100.0f);
 		}
 		else
 		{
@@ -64,13 +65,21 @@ void GeometryShaderManager::SetConstants()
 
 		dirty = true;
 	}
+
+	if (s_viewport_changed)
+	{
+		s_viewport_changed = false;
+
+		constants.lineptparams[0] = 2.0f * xfmem.viewport.wd;
+		constants.lineptparams[1] = -2.0f * xfmem.viewport.ht;
+
+		dirty = true;
+	}
 }
 
 void GeometryShaderManager::SetViewportChanged()
 {
-	constants.lineptparams[0] = 2.0f * xfmem.viewport.wd;
-	constants.lineptparams[1] = -2.0f * xfmem.viewport.ht;
-	dirty = true;
+	s_viewport_changed = true;
 }
 
 void GeometryShaderManager::SetProjectionChanged()
